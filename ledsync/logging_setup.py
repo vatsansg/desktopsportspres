@@ -25,6 +25,9 @@ def setup_logging(data_dir: Path | None = None) -> Path | None:
     one exists. Never raises: logging problems must not prevent startup."""
     root = logging.getLogger()
     root.setLevel(logging.INFO)
+    # Werkzeug's per-request access log would record the one-time launch URL
+    # (web/security.py). Warnings and errors are still logged.
+    logging.getLogger("werkzeug").setLevel(logging.WARNING)
     for h in list(root.handlers):
         root.removeHandler(h)
 

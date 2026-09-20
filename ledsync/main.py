@@ -11,7 +11,8 @@ import sys
 import time
 
 from . import APP_NAME, __version__, config, logging_setup, platform_checks
-from .db import init_db
+from .db import connect, init_db
+from .services import auth, oplog
 from .web import create_app, start_server
 
 log = logging.getLogger("ledsync")
@@ -36,6 +37,15 @@ def _auto_close(window, seconds: float) -> None:
     window.destroy()
 
 
+def _seed_and_log_startup(cfg: config.Config) -> None:
+    conn = connect(cfg.db_path)
+    try:
+        auth.seed_admin(conn)
+        oplog.record(conn, "Application Startup", "Success", f"{APP_NAME} v{__version__} started.")
+    finally:
+        conn.close()
+
+
 def _run(args: argparse.Namespace) -> None:
     cfg = config.load()
     log_path = logging_setup.setup_logging(cfg.data_dir)
@@ -47,23 +57,28 @@ def _run(args: argparse.Namespace) -> None:
         raise StartupError(WEBVIEW2_HELP)
 
     init_db(cfg.db_path)
+    _seed_and_log_startup(cfg)
 
     # Imported lazily so that non-UI entry points (e.g. the Phase 12 scheduled
     # run) never load pythonnet/WinForms.
     import webview
 
     running = start_server(create_app(cfg))
-    log.info("UI server listening on %s", running.url)
+    log.info("UI server listening on %s", running.url)  # never log launch_url: it carries the one-time token
     try:
         window = webview.create_window(
-            APP_NAME, running.url,
+            APP_NAME, running.launch_url,
             width=WINDOW_SIZE[0], height=WINDOW_SIZE[1], min_size=WINDOW_MIN_SIZE,
             background_color=WINDOW_BACKGROUND,
+            # Venue laptops can be small (a 1280x800 panel has only ~752px of usable
+            # height once the taskbar is counted). Maximised always fits the screen.
+            maximized=True,
         )
         if args.auto_close is not None:
-            webview.start(_auto_close, (window, args.auto_close))
+            webview.start(_auto_close, (window, args.auto_close), private_mode=True)
         else:
-            webview.start()
+            # private_mode: no cookies/form data/password autofill persisted by WebView2.
+            webview.start(private_mode=True)
     finally:
         if not running.stop():
             log.warning("UI server thread did not stop within the timeout")

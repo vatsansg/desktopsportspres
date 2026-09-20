@@ -2,13 +2,24 @@
 :root {
   --wtt-black: #000000;
   --wtt-white: #FFFFFF;
-  --wtt-orange: #FF6B00; /* signature accent: primary CTA / one key highlight only */
-  --wtt-blue: #007AD9;   /* links, tags */
+  --wtt-orange: #FF6B00; /* signature accent: the ONE primary action per screen, nothing decorative */
+  --wtt-orange-hover: #FF8533;
+  --wtt-blue: #007AD9;   /* links, focus ring */
   --wtt-teal: #2BABD2;   /* category badges */
 
   --surface: var(--wtt-black);
   --text: var(--wtt-white);
   --text-muted: #B3B3B3;
+
+  /* Neutral UI tokens (not brand colours): raised surfaces and borders. Borders are
+     deliberately strong so every control is visible on black. */
+  --surface-raised: #121212;
+  --border: #8C8C8C;
+  --border-subtle: #333333;
+
+  /* Functional status colours - the brand palette defines none. Text on black >= 7:1. */
+  --status-error: #FF6B6B;
+  --status-ok: #4ADE80;
 
   /* Roboto Bold / Bio Sans are not bundled yet (the app must work offline at a
      venue); the stacks fall back to installed system fonts. */
@@ -18,7 +29,7 @@
 
 * { box-sizing: border-box; }
 
-html, body { height: 100%; margin: 0; }
+html, body { min-height: 100%; margin: 0; }
 
 body {
   background: var(--surface);
@@ -28,36 +39,91 @@ body {
   line-height: 1.5;
 }
 
-h1 {
+h1, h2 {
   font-family: var(--font-display);
   font-weight: 700;
-  font-size: 2.5rem;
   line-height: 1.1;
   margin: 0 0 0.75rem;
 }
+h1 { font-size: 2.25rem; }
+h2 { font-size: 1.5rem; }
 
-.shell {
-  min-height: 100%;
-  display: flex;
-  flex-direction: column;
-  align-items: flex-start;
-  justify-content: center;
-  padding: 0 8vw;
+.lede { color: var(--text-muted); margin: 0 0 1.5rem; font-size: 1.05rem; }
+.eyebrow {
+  margin: 0 0 0.5rem; color: var(--text-muted);
+  font-size: 0.85rem; letter-spacing: 0.08em; text-transform: uppercase;
 }
+.hint { margin: 0.35rem 0 0; color: var(--text-muted); font-size: 0.875rem; }
 
-.accent-bar {
-  width: 72px;
-  height: 6px;
-  background: var(--wtt-orange);
-  margin-bottom: 1.5rem;
+/* ---- Focus: always visible ---- */
+:focus-visible { outline: 3px solid var(--wtt-blue); outline-offset: 2px; }
+
+/* ---- Buttons ---- */
+.btn {
+  font: inherit; font-weight: 700; text-decoration: none; cursor: pointer;
+  display: inline-flex; align-items: center; justify-content: center;
+  min-height: 44px; padding: 0 1.25rem; border: 2px solid transparent; border-radius: 4px;
 }
+.btn-primary { background: var(--wtt-orange); color: var(--wtt-black); letter-spacing: 0.04em; }
+.btn-primary:hover { background: var(--wtt-orange-hover); }
+.btn-secondary { background: transparent; color: var(--wtt-white); border-color: var(--border); }
+.btn-secondary:hover { border-color: var(--wtt-white); background: var(--surface-raised); }
+.btn-block { width: 100%; }
+.inline-form { display: inline; margin: 0; }
 
-.status { color: var(--text-muted); margin: 0; }
+/* ---- Forms ---- */
+.field { margin-bottom: 1.25rem; }
+label { display: block; font-weight: 700; margin-bottom: 0.4rem; }
 
-.version {
-  position: fixed;
-  right: 16px;
-  bottom: 12px;
-  color: var(--text-muted);
-  font-size: 0.8rem;
+input[type="text"], input[type="password"], input[type="email"], input[type="number"] {
+  font: inherit; color: var(--text); background: var(--surface-raised);
+  border: 2px solid var(--border); border-radius: 4px;
+  width: 100%; min-height: 44px; padding: 0 0.75rem;
 }
+input:hover { border-color: var(--wtt-white); }
+input:focus-visible { border-color: var(--wtt-blue); outline-offset: 0; }
+
+.input-group { display: flex; }
+.input-group input { border-top-right-radius: 0; border-bottom-right-radius: 0; border-right: 0; }
+.input-addon {
+  font: inherit; font-weight: 700; color: var(--text); background: var(--surface-raised);
+  border: 2px solid var(--border); border-radius: 0 4px 4px 0;
+  min-width: 76px; cursor: pointer;
+}
+.input-addon:hover { border-color: var(--wtt-white); }
+
+.form-actions { display: flex; gap: 0.75rem; margin-top: 0.5rem; }
+
+/* ---- Alerts ---- */
+.alert {
+  margin: 0 0 1.25rem; padding: 0.75rem 1rem; border-radius: 4px;
+  background: var(--surface-raised); border: 2px solid; border-left-width: 6px;
+}
+.alert-error { color: var(--status-error); border-color: var(--status-error); }
+.alert-success { color: var(--status-ok); border-color: var(--status-ok); }
+
+/* ---- Login ---- */
+.auth-shell { min-height: 100vh; display: grid; place-items: center; padding: 2rem 1rem; }
+.auth-card { width: 100%; max-width: 440px; }
+
+/* ---- Signed-in shell ---- */
+.topbar {
+  display: flex; align-items: center; justify-content: space-between; gap: 1rem;
+  padding: 0.75rem 2rem; border-bottom: 1px solid var(--border-subtle);
+}
+.topbar-brand { display: flex; align-items: center; gap: 0.6rem; }
+.topbar-title { font-family: var(--font-display); font-weight: 700; font-size: 1.15rem; }
+.topbar-actions { display: flex; align-items: center; gap: 0.75rem; }
+.topbar-user { color: var(--text-muted); margin-right: 0.5rem; }
+.topbar-user strong { color: var(--text); }
+
+.page { padding: 2rem; max-width: none; }
+.page-narrow { max-width: 560px; }
+
+.panel {
+  background: var(--surface-raised); border: 1px solid var(--border-subtle);
+  border-radius: 6px; padding: 1.5rem;
+}
+.empty-state p { margin: 0; color: var(--text-muted); }
+
+.version { position: fixed; right: 16px; bottom: 12px; color: var(--text-muted); font-size: 0.8rem; }
