@@ -7,9 +7,44 @@
   <p class="alert alert-{{ category }}" role="status">{{ message }}</p>
   {% endfor %}
   <h1>Dashboard</h1>
-  <section class="panel empty-state" aria-label="Events">
-    <h2>No Events Yet</h2>
-    <p>The event list lands here in Phase 2, and event registration follows in Phase 3.</p>
+
+  <section aria-labelledby="events-heading">
+    <div class="section-head">
+      <h2 id="events-heading">Events</h2>
+      {% if events %}<p class="count">{{ events|length }} registered</p>{% endif %}
+    </div>
+
+    {% if events %}
+    <div class="table-wrap" tabindex="0" role="region" aria-label="Registered events table">
+      <table class="data-table">
+        <caption class="sr-only">Registered events, most recently updated first</caption>
+        <thead>
+          <tr>
+            <th scope="col">Event ID</th>
+            <th scope="col">Event Name</th>
+            <th scope="col">Last Updated</th>
+            <th scope="col">Status</th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for e in events %}
+          <tr>
+            <td class="nowrap">{{ e.event_id }}</td>
+            <td>{{ e.event_name }}</td>
+            <td class="nowrap">{{ e.last_updated }}</td>
+            <td><span class="badge badge-{{ e.status_key }}">{{ e.status }}</span></td>
+          </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+    <p class="hint">Times are shown in this computer's local time.</p>
+    {% else %}
+    <div class="panel empty-state">
+      <h3>No Events Registered Yet</h3>
+      <p>Registered events appear here with their latest update and status. Event registration arrives in Phase 3.</p>
+    </div>
+    {% endif %}
   </section>
 </main>
 {% endblock %}

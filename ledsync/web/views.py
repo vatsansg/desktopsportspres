@@ -7,7 +7,7 @@ from flask import (
 )
 
 from .. import APP_NAME, __version__
-from ..services import auth, oplog
+from ..services import auth, events, oplog
 from .app_db import get_db
 from .security import SessionEpoch, is_authenticated, login_required
 
@@ -47,8 +47,10 @@ def launch():
 @bp.get("/")
 @login_required
 def dashboard():
+    event_rows = events.list_events(get_db(), tz=current_app.config.get("DISPLAY_TZ"))
     return render_template(
-        "dashboard.html", app_name=APP_NAME, version=__version__, username=session["user"]
+        "dashboard.html", app_name=APP_NAME, version=__version__, username=session["user"],
+        events=event_rows,
     )
 
 
