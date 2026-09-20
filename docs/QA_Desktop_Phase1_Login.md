@@ -46,9 +46,9 @@ Not testable by hand: the launch-token gate and CSRF (nothing in the app's own w
 
 | Total cases | Passed | Failed | Blocked | Not yet run |
 |---|---|---|---|---|
-| 63 | 50 (46 automated TC-A01 – TC-A46 + 4 scripted real-window TC-W01 – TC-W04) | 0 | 0 | 13 manual (TC-M01 – TC-M13, awaiting the user's run) |
+| 65 | 63 (48 automated TC-A01 – TC-A48 + 4 scripted real-window TC-W01 – TC-W04 + 11 manual TC-M01 – TC-M10 and TC-M12, run by the owner on 21/09/26: "all tested ok") | 0 | 0 | 2 manual not run (TC-M11 keyboard tab order and TC-M13 diagnostic-log check were not in the shortened guide the owner followed; both are covered by automated/scripted evidence) |
 
-Automated: `.\.venv\Scripts\python -m pytest -q` → **117 passed** (Phase 0 and Phase 1 combined; TC-A35 – TC-A46 were added after the independent architect review). Real-window checks (wrong password → error, correct → dashboard, Change Password with Show/Hide, clean close) were executed by keystroke script on 20/09/26; screenshots are in `docs/screenshots/phase1-*.png`.
+Automated: `.\.venv\Scripts\python -m pytest -q` → **119 passed** (Phase 0 and Phase 1 combined; TC-A35 – TC-A46 were added after the independent architect review). Real-window checks (wrong password → error, correct → dashboard, Change Password with Show/Hide, clean close) were executed by keystroke script on 20/09/26; screenshots are in `docs/screenshots/phase1-*.png`.
 
 ## Test cases — automated (pytest)
 
@@ -100,6 +100,8 @@ Automated: `.\.venv\Scripts\python -m pytest -q` → **117 passed** (Phase 0 and
 | TC-A44 | Extra headers: CSP `object-src 'none'`, COOP, CORP, Permissions-Policy | Present | Pass | Finding 9 |
 | TC-A45 | Password change is compare-and-set (a concurrent change is not silently overwritten) | "changed elsewhere" error, other value kept | Pass | Finding 5 |
 | TC-A46 | Login error is linked to both inputs (`aria-describedby`); no `aria-pressed` on the Show/Hide toggle; a failed audit-log write never breaks the login; Werkzeug access log suppressed | As expected | Pass | Findings 8, 12, 13 |
+| TC-A47 | WTT logo asset (`static/img/wtt-logo.png`) is a valid PNG and is served without a session (so the branded error page can show it) | 200 image/png | Pass | Added 21/09/26 at the owner's request |
+| TC-A48 | Logo appears on the Sign In page, the dashboard header and the error page, with alt text "World Table Tennis (WTT)" | Present | Pass | Also checked visually in the real window |
 
 ## Real-window scripted run (executed 20/09/26)
 
@@ -117,7 +119,7 @@ Automated: `.\.venv\Scripts\python -m pytest -q` → **117 passed** (Phase 0 and
 | F-02 | TC-M01 | System light title bar and default Python icon on the window frame. Dark title bar + WTT icon planned for the installer/UI polish phases. | Low | Open |
 | F-03 | TC-M01 | Roboto Bold / Bio Sans not bundled (app must work offline); falls back to system fonts on machines without Roboto. Bio Sans files needed from the brand owner. | Low | Open — needs user input |
 | F-10 | TC-A24 | Throttle is in memory: restarting the app clears it. Accepted for a venue-local single-admin tool; noted for completeness. | Info | Accepted |
-| F-11 | — | Manual-only checks TC-M01 – TC-M13 pending the user's run. | Info | Awaiting user |
+| F-11 | — | Manual checks TC-M01 – TC-M10 and TC-M12 passed (owner, 21/09/26). TC-M11/M13 not run by the owner. | Info | Closed (2 not run) |
 | F-06 | — | Per-launch token + CSRF (was carried from Phase 0) | — | **Closed in Phase 1** |
 | F-12 | — | Review notes carried to later phases: (a) no single-instance guard — two app instances can overwrite each other's session cookie (cookies are not port-scoped on 127.0.0.1) → named mutex/lock file before Phase 6/12; (b) settings service that hard-excludes `admin_*` keys from any generic list/export, and loosening the "no other module mentions `application_settings`" guard test deliberately at Phase 4; (c) operation-log: local-time display conversion (BRD 25 wants DD/MM/YY HH:MM:SS), coalescing/retention of Blocked rows (Phase 9); (d) migration runner with pre-migration DB backup and a UI-free bootstrap shared with the headless scheduled entry point; (e) per-user `%LOCALAPPDATA%` vs headless/no-user-logged-in scheduling decision (Phase 12); (f) optional skip-link. | Low–Medium | Carried forward |
 
@@ -126,4 +128,4 @@ Automated: `.\.venv\Scripts\python -m pytest -q` → **117 passed** (Phase 0 and
 | Role | Name | Date | Outcome |
 |---|---|---|---|
 | Independent Solution Architect review | Independent review agent (fresh context) | 20/09/26 | Approved with notes — no blockers; all "fix now" findings (session revocation, atomic throttle, branded 403, Host allow-list) fixed and covered by TC-A35 – TC-A46; remainder carried forward as F-12 |
-| User (Vatsan) go-ahead | | | Pending |
+| User (Vatsan) go-ahead | Vatsan | 21/09/26 | Approved — "All tested ok"; asked for WTT logo on login and dashboard header (done) and to commit and proceed |

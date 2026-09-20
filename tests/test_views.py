@@ -340,3 +340,21 @@ def test_new_security_headers_present(launched):
     assert h["Cross-Origin-Opener-Policy"] == "same-origin"
     assert h["Cross-Origin-Resource-Policy"] == "same-origin"
     assert "camera=()" in h["Permissions-Policy"]
+
+
+# --- WTT logo -------------------------------------------------------------
+
+def test_logo_asset_is_served_as_png_even_without_a_session(client):
+    resp = client.get("/static/img/wtt-logo.png")
+    assert resp.status_code == 200 and resp.mimetype == "image/png"
+    assert resp.data[:8] == b"\x89PNG\r\n\x1a\n"
+
+
+def test_logo_on_login_dashboard_and_error_pages(launched, client):
+    login = launched.get("/login").get_data(as_text=True)
+    assert 'src="/static/img/wtt-logo.png"' in login and 'alt="World Table Tennis (WTT)"' in login
+    error = client.get("/login").get_data(as_text=True)  # 403 page (no session)
+    assert "wtt-logo.png" in error
+    do_login(launched)
+    dash = launched.get("/").get_data(as_text=True)
+    assert "wtt-logo.png" in dash and 'class="topbar' in dash

@@ -102,6 +102,11 @@ input:focus-visible { border-color: var(--wtt-blue); outline-offset: 0; }
 .alert-error { color: var(--status-error); border-color: var(--status-error); }
 .alert-success { color: var(--status-ok); border-color: var(--status-ok); }
 
+/* ---- Logo (white wordmark + brand mark on transparent; made for dark surfaces) ---- */
+.logo { display: block; height: auto; }
+.logo-lg { width: 200px; margin: 0 0 1.75rem; }
+.logo-sm { width: 96px; }
+
 /* ---- Login ---- */
 .auth-shell { min-height: 100vh; display: grid; place-items: center; padding: 2rem 1rem; }
 .auth-card { width: 100%; max-width: 440px; }
@@ -111,7 +116,8 @@ input:focus-visible { border-color: var(--wtt-blue); outline-offset: 0; }
   display: flex; align-items: center; justify-content: space-between; gap: 1rem;
   padding: 0.75rem 2rem; border-bottom: 1px solid var(--border-subtle);
 }
-.topbar-brand { display: flex; align-items: center; gap: 0.6rem; }
+.topbar-brand { display: flex; align-items: center; gap: 1rem; }
+.topbar-brand .topbar-title { padding-left: 1rem; border-left: 1px solid var(--border-subtle); }
 .topbar-title { font-family: var(--font-display); font-weight: 700; font-size: 1.15rem; }
 .topbar-actions { display: flex; align-items: center; gap: 0.75rem; }
 .topbar-user { color: var(--text-muted); margin-right: 0.5rem; }

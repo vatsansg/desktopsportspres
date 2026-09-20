@@ -26,8 +26,8 @@ Status values: `Not started` / `In progress` / `Awaiting user go-ahead` / `Compl
 - **Security finding S-1 — resolved 20 September 2026:** a live Storage Account key sat in plaintext in the parent repo's `references/0forimplementation/desktop/OBSERVATIONS.txt` (never committed). On the owner's instruction that file is now git-ignored in the parent repo (`.gitignore` edited; parent repo not committed by Claude). Owner has not (yet) decided on key rotation. The file's contents were not modified.
 
 ## Phase 1 — Login
-- **Status:** Awaiting user go-ahead (built, independently reviewed and committed `47e3461` and merged to `main` (`47ca4f7`) on 20 September 2026 per the owner's instruction; the owner's manual test of the real app is still pending)
-- **Completed on:** 20 September 2026 (pending the owner's manual test)
+- **Status:** Complete (owner's manual test passed and go-ahead given 21 September 2026; built and reviewed 20 September; committed `47e3461`, merged to `main` `47ca4f7`; logo addition committed on 21 September — see table)
+- **Completed on:** 21 September 2026
 - **What was built:**
   - **Step 1.1:** WTT-branded Sign In screen (username autofocus, Show/Hide password toggle, single orange `SIGN IN`), placeholder Dashboard ("Signed in as admin", Change Password, Sign Out, full-width "No Events Yet" panel), Change Password screen. Fixed administrator `admin` / `Admin@123` seeded on first run into `application_settings` **in plain text (BRD 6.1 accepted risk)**; password changeable (current password + ≥ 8 chars + confirmation); a changed password survives restarts/upgrades (seed never overwrites).
   - **Owner decisions applied (20 Sep 2026):** credential lives in `application_settings`; only the password is changeable; short throttle (5 failures → 30 s); no idle timeout; no forced first-login change.
@@ -35,7 +35,8 @@ Status values: `Not started` / `In progress` / `Awaiting user go-ahead` / `Compl
   - **Logging:** login success/failure/blocked, logout, password change and application startup written to `operation_log` (UTC ISO timestamps, never any credentials; audit-write failures never break a login).
   - **Window:** now opens maximised (a fixed 800px-high window overshot the 752px working area on this 1280×800 display).
   - 117 automated tests pass (Phase 0 + 1); real-window keystroke run captured screenshots `docs/screenshots/phase1-*.png`.
-- **QA Test Case doc:** `docs/QA_Desktop_Phase1_Login.md` — 63 cases: 50 pass (46 automated + 4 real-window), 13 manual pending the owner's run; includes the step-by-step guide for testing the real app.
+- **Owner follow-up (21 Sep 2026):** added the WTT logo (`reference-docs/WTT-Logo.png` → `ledsync/web/static/img/wtt-logo.png`) to the Sign In screen, the signed-in header (with the app name beside it) and the error page.
+- **QA Test Case doc:** `docs/QA_Desktop_Phase1_Login.md` — 65 cases: 63 pass (48 automated, 4 real-window, 11 manual run by the owner), 2 manual not run (keyboard tab order, diagnostic-log check); 119 automated tests pass.
 - **Security Checklist:** `docs/Security_Desktop_Phase1_Login.md` (B2 scope guard verified by test: only `services/auth.py` touches the credential)
 - **Independent architect review:** Approved with notes, no blockers. Fixed now: session revocation (demonstrated by cookie replay), atomic throttle, branded dead-end 403, `localhost` removed from Host list, compare-and-set password update, best-effort audit writes, extra headers, accessibility (`aria-describedby`, toggle semantics), explicit private mode. Carried forward (QA doc F-12 / Security S-9): single-instance lock, settings service that excludes `admin_*`, log display/retention, migration runner + UI-free bootstrap, data-dir vs headless decision.
 - **`ralph-loop` / `wtt-brand` polish:** run (2 of max 3 iterations used; completion promise met). Changes: orange now used only for the primary button (removed decorative bar/dot), hover colour tokenised, input styling made type-agnostic; enforced by a test.
@@ -106,7 +107,7 @@ Status values: `Not started` / `In progress` / `Awaiting user go-ahead` / `Compl
 | Phase | Status | Go-ahead date | GitHub commit |
 |---|---|---|---|
 | 0 | Complete | 20 Sep 2026 | `a35cfe2` |
-| 1 | Awaiting user go-ahead | (committed per owner instruction 20 Sep 2026; manual test pending) | `47e3461` (merge `47ca4f7`) |
+| 1 | Complete | 21 Sep 2026 | `47e3461` (merge `47ca4f7`); logo follow-up: see git log |
 | 2 | Not started | | |
 | 3 | Not started | | |
 | 4 | Not started | | |
