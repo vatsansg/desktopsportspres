@@ -7,8 +7,8 @@ Status values: `Not started` / `In progress` / `Awaiting user go-ahead` / `Compl
 ---
 
 ## Phase 0 — Project Setup
-- **Status:** Awaiting user go-ahead (built and reviewed 20 September 2026; nothing committed or pushed yet)
-- **Completed on:** 20 September 2026 (pending go-ahead)
+- **Status:** Complete (user go-ahead 20 September 2026; committed `a35cfe2` and pushed to `main`)
+- **Completed on:** 20 September 2026
 - **What was built:**
   - **Step 0.1:** standalone git repo in `Applications/desktop` (`origin` = `desktopsportspres`, branch `phase-0-project-setup`; `.gitignore` written before anything else); Python 3.11 venv; package `ledsync/` split into `web/`, `services/`, `db/`, `config.py` per BRD §5. Flask served on a loopback-only random port in a background thread and shown in a native pywebview (Edge WebView2) window; WTT-branded placeholder (black surface, Roboto Bold headline, one orange accent, brand tokens as CSS variables). Clean shutdown on window close (verified: no leftover process). Startup failures show a dialog and write `<data>\logs\ledsync.log`; WebView2 absence is detected up front. `--auto-close N` flag for smoke tests.
   - **Step 0.2:** SQLite DB with the seven §26 tables (`ledsync/db/schema.py`), idempotent creation, existing data never touched, schema version via `PRAGMA user_version`, newer-version DBs refused, schema drift detected at startup; WAL + 5 s busy timeout + foreign keys; per-request connection helper.
@@ -23,7 +23,7 @@ Status values: `Not started` / `In progress` / `Awaiting user go-ahead` / `Compl
   3. **Reviewer's proposed WebView2 fix (`gui="edgechromium"`) was not used:** pywebview's own source shows it still falls back silently to MSHTML when the runtime is missing, so the app checks the registry itself and refuses to start instead.
   4. **Font files (Roboto Bold, Bio Sans) not bundled** — app must run offline; falls back to system fonts. Bio Sans files needed from the brand owner.
   5. **"Clean machine" validation** only approximated (fresh venv from `requirements.txt`) until the installer exists.
-- **Open item raised for the owner:** a live Storage Account key sits in plaintext in the parent repo's `references/0forimplementation/desktop/OBSERVATIONS.txt` (untracked, not git-ignored there, never committed). Not touched by Claude. See Security checklist finding S-1.
+- **Security finding S-1 — resolved 20 September 2026:** a live Storage Account key sat in plaintext in the parent repo's `references/0forimplementation/desktop/OBSERVATIONS.txt` (never committed). On the owner's instruction that file is now git-ignored in the parent repo (`.gitignore` edited; parent repo not committed by Claude). Owner has not (yet) decided on key rotation. The file's contents were not modified.
 
 ## Phase 1 — Login
 - **Status:** Not started
@@ -89,7 +89,7 @@ Status values: `Not started` / `In progress` / `Awaiting user go-ahead` / `Compl
 
 | Phase | Status | Go-ahead date | GitHub commit |
 |---|---|---|---|
-| 0 | Awaiting user go-ahead | | (not committed yet) |
+| 0 | Complete | 20 Sep 2026 | `a35cfe2` |
 | 1 | Not started | | |
 | 2 | Not started | | |
 | 3 | Not started | | |
