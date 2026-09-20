@@ -47,8 +47,8 @@ Status values: `Not started` / `In progress` / `Awaiting user go-ahead` / `Compl
   4. Fonts (Roboto Bold/Bio Sans) still not bundled — Bio Sans files needed from the brand owner (QA F-03).
 
 ## Phase 2 — Event Dashboard (SQLite only)
-- **Status:** Awaiting user go-ahead (built and independently reviewed 21 September 2026; the owner's manual test is pending; committed on branch `phase-2-event-dashboard` only — not merged to `main`, not pushed)
-- **Completed on:** 21 September 2026 (pending the owner's manual test)
+- **Status:** Complete (owner's manual test passed and go-ahead given 21 September 2026; built and independently reviewed the same day; merged to `main` and pushed — hashes in the table below)
+- **Completed on:** 21 September 2026
 - **What was built:**
   - **Step 2.1:** the Dashboard now lists registered events from the local `events` table: a full-width, high-contrast table with **Event ID, Event Name, Last Updated, Status**, an "N registered" count, and a clean empty state ("No Events Registered Yet"). Most recently updated first; undated rows last. Times are `DD/MM/YY HH:MM` (24-hour) in the venue machine's **local time** (stored as UTC ISO). Status is a text badge.
   - **Owner decisions applied (20 Sep 2026):** local-time display; status vocabulary **Registered / Ready / Synced / Attention needed** (blank = Registered; unknown text shown as-is with a neutral badge).
@@ -122,7 +122,7 @@ Status values: `Not started` / `In progress` / `Awaiting user go-ahead` / `Compl
 |---|---|---|---|
 | 0 | Complete | 20 Sep 2026 | `a35cfe2` |
 | 1 | Complete | 21 Sep 2026 | `47e3461` (merge `47ca4f7`); logo follow-up: see git log |
-| 2 | Awaiting user go-ahead | | branch `phase-2-event-dashboard` (local only) |
+| 2 | Complete | 21 Sep 2026 | see git log (merge of `phase-2-event-dashboard`) |
 | 3 | Not started | | |
 | 4 | Not started | | |
 | 5 | Not started | | |

@@ -45,7 +45,7 @@ Safety of the helper script (worth trying): run it with `LEDSYNC_DATA_DIR` unset
 
 | Total cases | Passed | Failed | Blocked | Not yet run |
 |---|---|---|---|---|
-| 43 | 34 (31 automated TC-A01 – TC-A31, many parametrised, + 3 rendered-page TC-R01 – TC-R03) | 0 | 0 | 9 manual (TC-M01 – TC-M09, awaiting the user's run) |
+| 43 | 43 (31 automated TC-A01 – TC-A31, many parametrised, + 3 rendered-page TC-R01 – TC-R03 + 9 manual TC-M01 – TC-M09, run by the owner on 21/09/26: "tested ok") | 0 | 0 | 0 |
 
 `.\.venv\Scripts\python -m pytest -q` → **207 passed** (Phases 0–2 combined). The populated and empty states were also rendered from the app's real templates and viewed in Chrome (screenshots `docs/screenshots/phase2-dashboard-populated.jpg`, `phase2-dashboard-empty.jpg`).
 
@@ -97,7 +97,7 @@ Safety of the helper script (worth trying): run it with `LEDSYNC_DATA_DIR` unset
 
 | ID | Linked test case | Description | Severity | Status |
 |---|---|---|---|---|
-| F-13 | TC-M01 – M09 | Manual checks pending the user's run. | Info | Awaiting user |
+| F-13 | TC-M01 – M09 | Manual checks run by the owner. | Info | Closed — passed |
 | F-14 | TC-A03 | Windows applies its *current* DST rules to past/future dates when converting to local time, so a date well outside today's rules could be off by an hour. Inherent to local-time display; the on-screen note says times are local. | Info | Accepted |
 | F-15 | — | Date-only stored values (`2026-09-08`) are treated as UTC midnight, so west of UTC they display as the previous day. Application-written values always carry a time, so this only affects hand-typed rows. | Low | Accepted |
 | F-16 | TC-R01 | Automated real-window (native WebView2) login typing is unreliable on this machine (a Windows voice-typing overlay interferes with focus), so the populated table was verified via rendered pages in Chrome plus the owner's manual run rather than by keystroke automation of the native window. Browser password entry was deliberately not performed. | Info | Noted |
@@ -108,4 +108,4 @@ Safety of the helper script (worth trying): run it with `LEDSYNC_DATA_DIR` unset
 | Role | Name | Date | Outcome |
 |---|---|---|---|
 | Independent Solution Architect review | Independent review agents (two fresh contexts) | 21/09/26 | **First pass: Rejected** (BLOCKER: one odd timestamp → HTTP 500 on the whole dashboard; reproduced independently). Fixed: bounded date range, never-raise formatting, per-row isolation, branded 500 page, hardened dev script (TC-A18 – TC-A29). **Focused re-check: Approved with notes** — tried 46 hostile values × 3 zones, GET / end to end, and 12 ways around the dev-script guards (relative paths, case, 8.3 names, junctions); found one residual hole (invalid-UTF-8 TEXT), now fixed (TC-A30), plus the year-2099 display edge (TC-A31) |
-| User (Vatsan) go-ahead | | | Pending |
+| User (Vatsan) go-ahead | Vatsan | 21/09/26 | Approved — "tested ok, commit and move to next phase" (manual checks TC-M01 – TC-M09 run by the owner) |
