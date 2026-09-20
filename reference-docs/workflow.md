@@ -26,7 +26,7 @@ Status values: `Not started` / `In progress` / `Awaiting user go-ahead` / `Compl
 - **Security finding S-1 — resolved 20 September 2026:** a live Storage Account key sat in plaintext in the parent repo's `references/0forimplementation/desktop/OBSERVATIONS.txt` (never committed). On the owner's instruction that file is now git-ignored in the parent repo (`.gitignore` edited; parent repo not committed by Claude). Owner has not (yet) decided on key rotation. The file's contents were not modified.
 
 ## Phase 1 — Login
-- **Status:** Awaiting user go-ahead (built, independently reviewed and committed to `main` on 20 September 2026 per the owner's instruction; the owner's manual test of the real app is still pending)
+- **Status:** Awaiting user go-ahead (built, independently reviewed and committed `47e3461` and merged to `main` (`47ca4f7`) on 20 September 2026 per the owner's instruction; the owner's manual test of the real app is still pending)
 - **Completed on:** 20 September 2026 (pending the owner's manual test)
 - **What was built:**
   - **Step 1.1:** WTT-branded Sign In screen (username autofocus, Show/Hide password toggle, single orange `SIGN IN`), placeholder Dashboard ("Signed in as admin", Change Password, Sign Out, full-width "No Events Yet" panel), Change Password screen. Fixed administrator `admin` / `Admin@123` seeded on first run into `application_settings` **in plain text (BRD 6.1 accepted risk)**; password changeable (current password + ≥ 8 chars + confirmation); a changed password survives restarts/upgrades (seed never overwrites).
@@ -106,7 +106,7 @@ Status values: `Not started` / `In progress` / `Awaiting user go-ahead` / `Compl
 | Phase | Status | Go-ahead date | GitHub commit |
 |---|---|---|---|
 | 0 | Complete | 20 Sep 2026 | `a35cfe2` |
-| 1 | Awaiting user go-ahead | (committed per owner instruction 20 Sep 2026; manual test pending) | see git log |
+| 1 | Awaiting user go-ahead | (committed per owner instruction 20 Sep 2026; manual test pending) | `47e3461` (merge `47ca4f7`) |
 | 2 | Not started | | |
 | 3 | Not started | | |
 | 4 | Not started | | |
