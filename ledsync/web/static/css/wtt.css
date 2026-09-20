@@ -1,0 +1,63 @@
+/* WTT brand tokens - never hard-code these hex values elsewhere. */
+:root {
+  --wtt-black: #000000;
+  --wtt-white: #FFFFFF;
+  --wtt-orange: #FF6B00; /* signature accent: primary CTA / one key highlight only */
+  --wtt-blue: #007AD9;   /* links, tags */
+  --wtt-teal: #2BABD2;   /* category badges */
+
+  --surface: var(--wtt-black);
+  --text: var(--wtt-white);
+  --text-muted: #B3B3B3;
+
+  /* Roboto Bold / Bio Sans are not bundled yet (the app must work offline at a
+     venue); the stacks fall back to installed system fonts. */
+  --font-display: "Roboto", "Segoe UI", Arial, sans-serif;
+  --font-body: "Bio Sans", "Segoe UI", Arial, sans-serif;
+}
+
+* { box-sizing: border-box; }
+
+html, body { height: 100%; margin: 0; }
+
+body {
+  background: var(--surface);
+  color: var(--text);
+  font-family: var(--font-body);
+  font-size: 16px;
+  line-height: 1.5;
+}
+
+h1 {
+  font-family: var(--font-display);
+  font-weight: 700;
+  font-size: 2.5rem;
+  line-height: 1.1;
+  margin: 0 0 0.75rem;
+}
+
+.shell {
+  min-height: 100%;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  justify-content: center;
+  padding: 0 8vw;
+}
+
+.accent-bar {
+  width: 72px;
+  height: 6px;
+  background: var(--wtt-orange);
+  margin-bottom: 1.5rem;
+}
+
+.status { color: var(--text-muted); margin: 0; }
+
+.version {
+  position: fixed;
+  right: 16px;
+  bottom: 12px;
+  color: var(--text-muted);
+  font-size: 0.8rem;
+}

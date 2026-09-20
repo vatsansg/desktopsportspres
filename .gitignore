@@ -1,0 +1,50 @@
+# --- Secrets: the Storage Account access key lives ONLY in a local .env (Solution Plan 1.1, BRD 4/33.3) ---
+.env
+.env.*
+!.env.example
+*.local.txt
+*credentials*.local*
+.azure_storage_credentials*
+OBSERVATIONS.txt
+*.pfx
+*.pem
+*.key
+
+# --- Local runtime data (SQLite DB, logs, downloaded assets, local change log) ---
+*.db
+*.db-journal
+*.db-wal
+*.db-shm
+*.sqlite
+*.sqlite3
+*.log
+data/
+logs/
+_localchangelog.csv
+
+# --- Python ---
+.venv/
+venv/
+__pycache__/
+*.py[cod]
+*.egg-info/
+.pytest_cache/
+.coverage
+htmlcov/
+
+# --- Build / installer output (Phase 13) ---
+dist/
+build/
+installer/stage/
+installer/output/
+
+# --- Editor / OS ---
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# --- Claude Code local state (mirrors the web repo) ---
+.claude/ralph-loop.local.md
+.claude/scheduled_tasks.lock
