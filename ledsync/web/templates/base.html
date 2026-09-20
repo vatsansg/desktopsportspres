@@ -2,17 +2,14 @@
 <html lang="en">
 <head>
   <meta charset="utf-8">
-  <title>{{ app_name }}</title>
+  <title>{% block title %}{{ app_name }}{% endblock %}</title>
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <link rel="icon" href="data:,">
   <link rel="stylesheet" href="{{ url_for('static', filename='css/wtt.css') }}">
+  <script src="{{ url_for('static', filename='js/app.js') }}" defer></script>
 </head>
 <body>
-  <main class="shell">
-    <div class="accent-bar" aria-hidden="true"></div>
-    <h1>{{ app_name }}</h1>
-    <p class="status">Application shell is running. Sign-in arrives in Phase 1.</p>
-  </main>
+  {% block body %}{% endblock %}
   <span class="version">v{{ version }}</span>
 </body>
 </html>

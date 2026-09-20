@@ -145,3 +145,43 @@ def test_connection_uses_wal_busy_timeout_and_foreign_keys(data_dir):
         assert conn.execute("PRAGMA foreign_keys").fetchone()[0] == 1
     finally:
         conn.close()
+
+
+# --- Phase 1 startup hooks ------------------------------------------------
+
+def test_startup_seeds_the_default_admin_and_logs_the_start(data_dir):
+    from ledsync.services import auth
+
+    cfg = config.load()
+    init_db(cfg.db_path)
+    main_mod._seed_and_log_startup(cfg)
+    main_mod._seed_and_log_startup(cfg)  # a second launch must not reset anything
+
+    conn = connect(cfg.db_path)
+    try:
+        assert auth.check_credentials(conn, "admin", "Admin@123")
+        rows = conn.execute("SELECT operation, status FROM operation_log ORDER BY log_id").fetchall()
+    finally:
+        conn.close()
+    assert [tuple(r) for r in rows] == [("Application Startup", "Success")] * 2
+
+
+def test_werkzeug_access_log_is_suppressed_so_the_launch_token_never_reaches_a_log(data_dir):
+    import logging
+
+    from ledsync import logging_setup
+
+    logging_setup.setup_logging(data_dir)
+    assert logging.getLogger("werkzeug").getEffectiveLevel() >= logging.WARNING
+
+
+def test_audit_write_failure_does_not_break_the_caller(cfg, caplog):
+    """A failed operation_log write must not turn a login into a 500."""
+    from ledsync.services import oplog
+
+    init_db(cfg.db_path)
+    conn = connect(cfg.db_path)
+    conn.close()  # writing on a closed connection raises sqlite3.ProgrammingError
+    with caplog.at_level("ERROR"):
+        oplog.record(conn, "Login", "Success", "x")  # must not raise
+    assert "Could not write operation_log" in caplog.text

@@ -26,8 +26,24 @@ Status values: `Not started` / `In progress` / `Awaiting user go-ahead` / `Compl
 - **Security finding S-1 — resolved 20 September 2026:** a live Storage Account key sat in plaintext in the parent repo's `references/0forimplementation/desktop/OBSERVATIONS.txt` (never committed). On the owner's instruction that file is now git-ignored in the parent repo (`.gitignore` edited; parent repo not committed by Claude). Owner has not (yet) decided on key rotation. The file's contents were not modified.
 
 ## Phase 1 — Login
-- **Status:** Not started
-- **Completed on:** / **What was built:** / **QA Test Case doc:** / **Security Checklist:** / **Deviations:**
+- **Status:** Awaiting user go-ahead (built, independently reviewed and committed to `main` on 20 September 2026 per the owner's instruction; the owner's manual test of the real app is still pending)
+- **Completed on:** 20 September 2026 (pending the owner's manual test)
+- **What was built:**
+  - **Step 1.1:** WTT-branded Sign In screen (username autofocus, Show/Hide password toggle, single orange `SIGN IN`), placeholder Dashboard ("Signed in as admin", Change Password, Sign Out, full-width "No Events Yet" panel), Change Password screen. Fixed administrator `admin` / `Admin@123` seeded on first run into `application_settings` **in plain text (BRD 6.1 accepted risk)**; password changeable (current password + ≥ 8 chars + confirmation); a changed password survives restarts/upgrades (seed never overwrites).
+  - **Owner decisions applied (20 Sep 2026):** credential lives in `application_settings`; only the password is changeable; short throttle (5 failures → 30 s); no idle timeout; no forced first-login change.
+  - **Security (closes Phase 0's carried F-06):** loopback server gated by a one-time launch token exchanged for a signed HttpOnly SameSite=Strict session cookie; CSRF token on every POST; session fixation defence; server-side session epoch so logout and password change revoke previously issued cookies; atomic throttle; exact `127.0.0.1:<port>` Host only; branded 403/404/405/413 pages; extra security headers; no server version advertised; WebView2 private mode; launch token never logged; Werkzeug access log suppressed.
+  - **Logging:** login success/failure/blocked, logout, password change and application startup written to `operation_log` (UTC ISO timestamps, never any credentials; audit-write failures never break a login).
+  - **Window:** now opens maximised (a fixed 800px-high window overshot the 752px working area on this 1280×800 display).
+  - 117 automated tests pass (Phase 0 + 1); real-window keystroke run captured screenshots `docs/screenshots/phase1-*.png`.
+- **QA Test Case doc:** `docs/QA_Desktop_Phase1_Login.md` — 63 cases: 50 pass (46 automated + 4 real-window), 13 manual pending the owner's run; includes the step-by-step guide for testing the real app.
+- **Security Checklist:** `docs/Security_Desktop_Phase1_Login.md` (B2 scope guard verified by test: only `services/auth.py` touches the credential)
+- **Independent architect review:** Approved with notes, no blockers. Fixed now: session revocation (demonstrated by cookie replay), atomic throttle, branded dead-end 403, `localhost` removed from Host list, compare-and-set password update, best-effort audit writes, extra headers, accessibility (`aria-describedby`, toggle semantics), explicit private mode. Carried forward (QA doc F-12 / Security S-9): single-instance lock, settings service that excludes `admin_*`, log display/retention, migration runner + UI-free bootstrap, data-dir vs headless decision.
+- **`ralph-loop` / `wtt-brand` polish:** run (2 of max 3 iterations used; completion promise met). Changes: orange now used only for the primary button (removed decorative bar/dot), hover colour tokenised, input styling made type-agnostic; enforced by a test.
+- **Deviations:**
+  1. Added non-brand functional tokens (`--status-error`, `--status-ok`, neutral surface/border greys) because the WTT palette defines no error/success colour or control borders; borders are deliberately strong for contrast on black (the owner's web-app feedback).
+  2. `operation_log` timestamps stored as UTC ISO; display conversion to DD/MM/YY HH:MM:SS is a later-phase task. This fixes UTC for this log only and does **not** settle the open BRD §36 timezone decision for change-log comparison.
+  3. Static CSS/JS is exempt from the launch gate (public source) so the branded error page can render.
+  4. Fonts (Roboto Bold/Bio Sans) still not bundled — Bio Sans files needed from the brand owner (QA F-03).
 
 ## Phase 2 — Event Dashboard (SQLite only)
 - **Status:** Not started
@@ -90,7 +106,7 @@ Status values: `Not started` / `In progress` / `Awaiting user go-ahead` / `Compl
 | Phase | Status | Go-ahead date | GitHub commit |
 |---|---|---|---|
 | 0 | Complete | 20 Sep 2026 | `a35cfe2` |
-| 1 | Not started | | |
+| 1 | Awaiting user go-ahead | (committed per owner instruction 20 Sep 2026; manual test pending) | see git log |
 | 2 | Not started | | |
 | 3 | Not started | | |
 | 4 | Not started | | |

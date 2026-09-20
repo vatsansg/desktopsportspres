@@ -1,0 +1,12 @@
+{% extends "base.html" %}
+{% block title %}{{ title }} — {{ app_name }}{% endblock %}
+{% block body %}
+<main class="auth-shell">
+  <section class="auth-card" aria-labelledby="error-title">
+    <p class="eyebrow">{{ app_name }}</p>
+    <h1 id="error-title">{{ title }}</h1>
+    <p class="lede">{{ message }}</p>
+    <p class="hint">Reference: {{ code }}</p>
+  </section>
+</main>
+{% endblock %}

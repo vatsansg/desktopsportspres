@@ -1,0 +1,15 @@
+{% extends "base.html" %}
+{% block title %}Dashboard — {{ app_name }}{% endblock %}
+{% block body %}
+{% include "_topbar.html" %}
+<main class="page">
+  {% for category, message in get_flashed_messages(with_categories=true) %}
+  <p class="alert alert-{{ category }}" role="status">{{ message }}</p>
+  {% endfor %}
+  <h1>Dashboard</h1>
+  <section class="panel empty-state" aria-label="Events">
+    <h2>No Events Yet</h2>
+    <p>The event list lands here in Phase 2, and event registration follows in Phase 3.</p>
+  </section>
+</main>
+{% endblock %}
