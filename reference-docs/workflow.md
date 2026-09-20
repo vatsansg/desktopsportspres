@@ -121,8 +121,8 @@ Status values: `Not started` / `In progress` / `Awaiting user go-ahead` / `Compl
 | Phase | Status | Go-ahead date | GitHub commit |
 |---|---|---|---|
 | 0 | Complete | 20 Sep 2026 | `a35cfe2` |
-| 1 | Complete | 21 Sep 2026 | `47e3461` (merge `47ca4f7`); logo follow-up: see git log |
-| 2 | Complete | 21 Sep 2026 | see git log (merge of `phase-2-event-dashboard`) |
+| 1 | Complete | 21 Sep 2026 | `47e3461` (merge `47ca4f7`); logo follow-up `8ffc002` |
+| 2 | Complete | 21 Sep 2026 | `29e54c5` + `ac03ded` (merge `8d2c25e`) |
 | 3 | Not started | | |
 | 4 | Not started | | |
 | 5 | Not started | | |
