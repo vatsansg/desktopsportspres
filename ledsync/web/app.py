@@ -21,6 +21,7 @@ ERROR_PAGES = {
     404: ("Page Not Found", "That page does not exist. Go back to the dashboard."),
     405: DEFAULT_ERROR,
     413: ("Request Too Large", "The information sent was too large. Go back and shorten it."),
+    500: ("Something Went Wrong", "The application hit an unexpected problem. Go back and try again; if it continues, restart the application."),
 }
 
 
@@ -42,6 +43,8 @@ def create_app(config: Config) -> Flask:
         # Not Secure: the server is plain HTTP on loopback by design.
         MAX_CONTENT_LENGTH=64 * 1024,
     )
+    # tzinfo used to display timestamps; None = this machine's local time (owner decision).
+    app.config["DISPLAY_TZ"] = None
     app.extensions["ledsync.throttle"] = LoginThrottle()
 
     @app.before_request
@@ -61,6 +64,7 @@ def create_app(config: Config) -> Flask:
     @app.errorhandler(404)
     @app.errorhandler(405)
     @app.errorhandler(413)
+    @app.errorhandler(500)
     def _branded_error(err):
         title, message = ERROR_PAGES.get(err.code, DEFAULT_ERROR)
         return render_template(

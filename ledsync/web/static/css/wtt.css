@@ -130,6 +130,42 @@ input:focus-visible { border-color: var(--wtt-blue); outline-offset: 0; }
   background: var(--surface-raised); border: 1px solid var(--border-subtle);
   border-radius: 6px; padding: 1.5rem;
 }
+.empty-state h3 { font-family: var(--font-display); font-weight: 700; font-size: 1.5rem; margin: 0 0 0.5rem; }
 .empty-state p { margin: 0; color: var(--text-muted); }
+
+.section-head { display: flex; align-items: baseline; gap: 1rem; margin-bottom: 0.75rem; }
+.section-head h2 { margin: 0; }
+.count { margin: 0; color: var(--text-muted); }
+
+/* ---- Data table: full width, strong lines so rows read clearly on black ---- */
+.table-wrap { width: 100%; overflow-x: auto; border: 1px solid var(--border); border-radius: 6px; }
+.data-table { width: 100%; border-collapse: collapse; }
+.data-table th, .data-table td { text-align: left; padding: 0.85rem 1.25rem; vertical-align: middle; }
+.data-table thead th {
+  background: var(--surface-raised); font-weight: 700; white-space: nowrap;
+  border-bottom: 2px solid var(--border);
+}
+.data-table tbody td { border-bottom: 1px solid var(--border-subtle); }
+.data-table tbody tr:last-child td { border-bottom: 0; }
+.data-table tbody tr:hover td { background: var(--surface-raised); }
+.nowrap { white-space: nowrap; }
+.data-table td { overflow-wrap: anywhere; }
+.nowrap { overflow-wrap: normal; }
+
+/* ---- Status badges: always text (never colour alone) ---- */
+.badge {
+  display: inline-block; padding: 0.15rem 0.7rem; border: 2px solid var(--border);
+  border-radius: 999px; font-weight: 700; font-size: 0.9rem; white-space: nowrap;
+}
+.badge-registered { color: var(--text); border-color: var(--border); }
+.badge-ready      { color: var(--text); border-color: var(--wtt-blue); }
+.badge-synced     { color: var(--status-ok); border-color: var(--status-ok); }
+.badge-attention  { color: var(--status-error); border-color: var(--status-error); }
+.badge-other      { color: var(--text-muted); border-color: var(--border); }
+
+.sr-only {
+  position: absolute; width: 1px; height: 1px; margin: -1px; padding: 0;
+  overflow: hidden; clip: rect(0, 0, 0, 0); white-space: nowrap; border: 0;
+}
 
 .version { position: fixed; right: 16px; bottom: 12px; color: var(--text-muted); font-size: 0.8rem; }

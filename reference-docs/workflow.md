@@ -47,8 +47,22 @@ Status values: `Not started` / `In progress` / `Awaiting user go-ahead` / `Compl
   4. Fonts (Roboto Bold/Bio Sans) still not bundled — Bio Sans files needed from the brand owner (QA F-03).
 
 ## Phase 2 — Event Dashboard (SQLite only)
-- **Status:** Not started
-- **Completed on:** / **What was built:** / **QA Test Case doc:** / **Security Checklist:** / **Deviations:**
+- **Status:** Complete (owner's manual test passed and go-ahead given 21 September 2026; built and independently reviewed the same day; merged to `main` and pushed — hashes in the table below)
+- **Completed on:** 21 September 2026
+- **What was built:**
+  - **Step 2.1:** the Dashboard now lists registered events from the local `events` table: a full-width, high-contrast table with **Event ID, Event Name, Last Updated, Status**, an "N registered" count, and a clean empty state ("No Events Registered Yet"). Most recently updated first; undated rows last. Times are `DD/MM/YY HH:MM` (24-hour) in the venue machine's **local time** (stored as UTC ISO). Status is a text badge.
+  - **Owner decisions applied (20 Sep 2026):** local-time display; status vocabulary **Registered / Ready / Synced / Attention needed** (blank = Registered; unknown text shown as-is with a neutral badge).
+  - **Robustness:** display code can never raise on stored data. Only dates 1970–2098 are converted (Windows cannot convert others); anything else, and any unparseable value, is shown as its raw text; invalid-UTF-8 text, BLOBs and numeric values are coerced; each row is isolated so one bad row cannot hide the list; a branded 500 page replaces the stock server error page.
+  - **Dev helper** `scripts/insert_test_event.py` (not shipped): inserts sample rows only into an explicitly named scratch folder; refuses the real data folder and non-existent folders (unless `--create`); never overwrites an existing event.
+  - 207 automated tests pass (Phases 0–2). Populated and empty states were rendered from the real templates and viewed in Chrome (`docs/screenshots/phase2-*.jpg`).
+- **QA Test Case doc:** `docs/QA_Desktop_Phase2_EventDashboard.md` — 43 cases: 34 pass (31 automated, 3 rendered-page), 9 manual pending the owner's run; includes the step-by-step real-app guide.
+- **Security Checklist:** `docs/Security_Desktop_Phase2_EventDashboard.md` (B2 scope guard re-verified: `events.py` never touches `application_settings`)
+- **Independent architect review:** **First pass REJECTED** — reproduced BLOCKER: one row with a timestamp before 1970 (or year 9999 etc.) made the whole dashboard return HTTP 500 on Windows. Fixed, along with: tests that had missed it, a dev script that could have overwritten a real event, missing raw values on rows, BLOB/NUL handling, and table keyboard access. **Focused re-check: APPROVED with notes** (it found one more hole — invalid-UTF-8 text — now fixed, and the year-2099 display edge, now fixed by accepting only 1970–2098).
+- **`ralph-loop` / `wtt-brand`:** brand rules applied (orange untouched; blue used as the Ready badge border with white text for contrast; strong borders). `ralph-loop` was **not re-run** for this phase: it is one table screen with no new interaction beyond what Phase 1's loop covered — say if you want a pass.
+- **Deviations:**
+  1. Event status vocabulary differs from BRD 33.4's operation-status wording, by owner choice; later phases and the Phase 11 email must map between them. "Ready" is defined as configured and mapped (Phase 5/8 to confirm exactly when it is set).
+  2. The native-window keystroke test could not log in reliably on this machine (a Windows voice-typing overlay interferes with focus), so the populated table was verified from the app's real templates in Chrome instead. Browser password entry was deliberately not performed.
+  3. Date-only stored values (`2026-09-08`) are treated as UTC midnight, so west of UTC they show as the previous day. Application-written values always carry a time.
 
 ## Phase 3 — Event Registration and GUID Validation
 - **Status:** Not started
@@ -108,7 +122,7 @@ Status values: `Not started` / `In progress` / `Awaiting user go-ahead` / `Compl
 |---|---|---|---|
 | 0 | Complete | 20 Sep 2026 | `a35cfe2` |
 | 1 | Complete | 21 Sep 2026 | `47e3461` (merge `47ca4f7`); logo follow-up: see git log |
-| 2 | Not started | | |
+| 2 | Complete | 21 Sep 2026 | see git log (merge of `phase-2-event-dashboard`) |
 | 3 | Not started | | |
 | 4 | Not started | | |
 | 5 | Not started | | |
