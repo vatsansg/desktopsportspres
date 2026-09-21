@@ -133,9 +133,9 @@ Status values: `Not started` / `In progress` / `Awaiting user go-ahead` / `Compl
   5. Carried: F-32 (test proves this Windows account only; unattended runs in Phase 12), F-35 – F-37 (see QA doc). Owner (21 Sep 2026): the probe file being placed in the destination folder is fine (F-34 closed).
 
 ## Phase 6 — Change Log and Incremental Download Logic
-- **Status:** Built, polished and independently reviewed — **awaiting the owner's manual test and go-ahead** (branch `phase-6-change-log-and-incremental-download`, not yet merged)
+- **Status:** Complete (owner go-ahead 21 September 2026, given once the RPI download and RPI folder setting were delivered — both done and proven against the real Azure file; **the owner had not run the manual steps TC-M01 – TC-M23**, which remain in the QA document; built, polished and independently reviewed twice; merged to `main` and pushed — hashes in the table below)
 - **Includes:** cloud change log retrieval and parsing; local change log; incremental comparison; **and, at the owner's request (21 Sep 2026), download of the event's `RPI` files to a local RPI folder with a Settings entry for it.** No Table/LED file is downloaded, and nothing is pushed to LED devices, in this phase.
-- **Completed on:** 21 September 2026 (build); owner test pending
+- **Completed on:** 21 September 2026
 - **What was built:**
   - **Step 6.1 — retrieve and parse:** `services/changelog.py` reads the event's `_ledassetschangelog.csv` (real name; the BRD spelling `_ledassetchangelog.csv` is the fallback) through the existing read-only client, size-capped in the request itself (5 MB / 50,000 rows). Strict decoding; each row validated (safe relative path, status New/Updated/Deleted, readable UTC time); **bad rows are skipped, counted and shown with a fixed reason, the rest still used**. The path is the **full path** (`Table 1/Inner/sponsorsequence.csv`), so the same file name in different tables/LED folders stays distinct (web BRD v2.4).
   - **Step 6.2 — local change log:** the database (`download_history`) is the record; `_localchangelog.csv` in the application data folder is its CSV copy with the BRD §17 columns, created at start-up (headers only, initially empty), rewritten atomically, formula-neutralised, never fatal if it cannot be written.

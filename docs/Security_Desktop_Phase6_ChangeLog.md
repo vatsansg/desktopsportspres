@@ -94,4 +94,4 @@ Status values: **Pass**, **Fail**, **N/A at this stage**, **Accepted risk** (BRD
 |---|---|---|---|
 | Independent Solution Architect review | Independent review agent (fresh context) | 21/09/26 | **Approved with notes** — no blockers; findings S-37, S-39, S-40 fixed and regression-tested (83 tests); fixes not given a second independent pass |
 | Second independent review (RPI download and local file writes) | Independent review agent (fresh context) | 21/09/26 | **Approved with notes, conditional on four fixes (S-43 – S-46), all done and regression-tested (82 tests); not re-reviewed** |
-| User (Vatsan) go-ahead | Vatsan | | *pending manual test* |
+| User (Vatsan) go-ahead | Vatsan | 21/09/26 | Approved once the RPI download and RPI folder setting were delivered (done, proven live); manual steps not yet run by the owner |
