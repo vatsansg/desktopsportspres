@@ -220,7 +220,7 @@ Status values: `Not started` / `In progress` / `Awaiting user go-ahead` / `Compl
 | 4 | Complete | 21 Sep 2026 | `cdc9aa8`, `35bb338`, `f03586e` (merge `2efaafe`) |
 | 5 | Complete | 21 Sep 2026 | `6cf6b79`, `840ee2e`, `11f42dd` (merge `7907ba3`) |
 | 6 | Complete | 21 Sep 2026 | `99de658`, `2b0fa10`, `efbef49`, `caf4c39`, `8e6a8b8` (merge `9293a99`) |
-| 7 | Complete | 21 Sep 2026 | HASHES |
+| 7 | Complete | 21 Sep 2026 | `ea129f4`, `d5ff7eb`, `234b287`, `107ed3c` (merge `10af9dc`) |
 | 8 | Not started | | |
 | 9 | Not started | | |
 | 10 | Not started | | |
