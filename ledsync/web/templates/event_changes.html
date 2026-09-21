@@ -51,7 +51,7 @@
     <form method="post" action="{{ url_for('changes.download_rpi', event_id=event.event_id) }}" novalidate data-busy-text="DOWNLOADING…">
       <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
       <div class="form-actions">
-        <button type="submit" class="btn btn-secondary" data-busy-label="Downloading…">Download RPI Files ({{ rpi_waiting }})</button>
+        <button type="submit" class="btn btn-secondary" data-busy-label="Downloading…">Update RPI Files ({{ rpi_waiting }})</button>
       </div>
     </form>
     {% else %}

@@ -63,8 +63,10 @@ def page(event_id):
                    done=_section(c, changes.DONE, tz), na=_section(c, changes.NOT_APPLICABLE, tz),
                    n_new=c.count_label(changes.LABEL_NEW), n_updated=c.count_label(changes.LABEL_UPDATED),
                    n_removed=c.count_label(changes.LABEL_REMOVED), skipped=c.skipped[:20], future=report.future_dated,
-                   rpi_waiting=len(rpi.rpi_items(c)))
-    ctx["rpi_folder"] = cloud_settings.load_rpi_folder(get_db(), current_app.config["LEDSYNC"].data_dir)
+                   )
+    ctx["rpi_folder"] = folder = cloud_settings.load_rpi_folder(get_db(), current_app.config["LEDSYNC"].data_dir)
+    if report is not None:
+        ctx["rpi_waiting"] = len(rpi.rpi_items(report.comparison, folder.effective))
     return render_template("event_changes.html", **ctx)
 
 
@@ -124,8 +126,17 @@ def download_rpi(event_id):
     if result.total == 0:
         flash("There were no RPI files to download or remove.", "info")
         return back
-    flash(f"RPI files: {result.downloaded} downloaded, {result.removed} removed, {result.failed} failed. "
-          f"Saved in {folder.effective}.", "success" if not result.failed else "error")
+    summary = f"RPI files: {result.downloaded} downloaded, {result.removed} removed, {result.failed} failed."
+    if result.kept:
+        summary += f" {result.kept} kept (another event uses the file)."
+    if result.downloaded:
+        summary += f" Saved in {folder.effective}."
+    flash(summary, "success" if not result.failed else "error")
     for failure in result.failures[:10]:
         flash(failure, "error")
+    if result.stopped:
+        flash(f"Stopped after a connection or permission problem; {result.remaining} file(s) were not tried. "
+              "Check the connection and press the button again.", "error")
+    elif result.remaining:
+        flash(f"{result.remaining} more file(s) are waiting. Press the button again to continue.", "info")
     return back

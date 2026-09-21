@@ -17,6 +17,7 @@ Real-event facts this module is built around (checked against the live test even
 
 import csv
 import io
+import re
 import unicodedata
 from dataclasses import dataclass
 from datetime import datetime
@@ -34,6 +35,14 @@ _WINDOWS_BAD_CHARS = set('<>:"|?*\\')
 _RESERVED = {"CON", "PRN", "AUX", "NUL", "CONIN$", "CONOUT$",
              *(f"COM{i}" for i in range(10)), *(f"LPT{i}" for i in range(10)),
              *(f"{p}{d}" for p in ("COM", "LPT") for d in "\u00b9\u00b2\u00b3")}
+# Types that can carry running code or make Windows contact another computer when a folder is opened. The
+# change log is untrusted, so they are never accepted as assets (this is not a list of "bad" media types).
+BLOCKED_EXTENSIONS = frozenset({
+    ".exe", ".dll", ".com", ".scr", ".pif", ".msi", ".msp", ".bat", ".cmd", ".ps1", ".psm1", ".vbs", ".vbe", ".js",
+    ".jse", ".wsf", ".wsh", ".hta", ".cpl", ".jar", ".reg", ".inf", ".lnk", ".url", ".scf", ".library-ms",
+    ".searchconnector-ms", ".appref-ms", ".gadget", ".application"})
+BLOCKED_NAMES = frozenset({"desktop.ini", "autorun.inf", "thumbs.db"})
+_SHORT_NAME = re.compile(r"^[^.]{1,6}~[0-9]{1,6}(\.[^.]{0,3})?$")    # an 8.3 alias such as LONGFI~1.PNG
 STATUSES = {"new": "New", "updated": "Updated", "deleted": "Deleted"}
 REQUIRED = ("filename", "changetimestamp", "status")
 
@@ -96,6 +105,16 @@ def _path_problem(path: str) -> str | None:
             return "A file or folder name in the path starts with a space or ends with a space or dot."
         if segment.split(".")[0].rstrip(" ").upper() in _RESERVED:
             return "A file or folder name in the path is a reserved Windows name."
+        if _SHORT_NAME.match(segment):
+            return "A file or folder name in the path looks like a short Windows (8.3) name, which could stand for another file."
+    return None
+
+
+def blocked_name_problem(name: str) -> str | None:
+    """Why a FILE name is refused whatever its folder, or None (see BLOCKED_EXTENSIONS)."""
+    lowered = name.casefold()
+    if lowered in BLOCKED_NAMES or "." in lowered and "." + lowered.rsplit(".", 1)[1] in BLOCKED_EXTENSIONS:
+        return "This type of file is not accepted (it can run code or is a Windows system file)."
     return None
 
 
@@ -147,7 +166,7 @@ def _row(row: list[str], line: int, index: dict[str, int]) -> tuple[CloudEntry |
     if len(row) <= max(index[c] for c in REQUIRED):
         return None, "The row is missing columns."
     path = row[index["filename"]]
-    problem = _path_problem(path)
+    problem = _path_problem(path) or blocked_name_problem(path.rsplit("/", 1)[-1])
     if problem:
         return None, problem
     status = STATUSES.get(row[index["status"]].strip().casefold())

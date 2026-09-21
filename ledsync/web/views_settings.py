@@ -47,7 +47,7 @@ def folders():
 def folders_post():
     db = get_db()
     data_dir = current_app.config["LEDSYNC"].data_dir
-    typed = request.form.get("rpi_folder", "")[:200]
+    typed = request.form.get("rpi_folder", "")[:1000]
     try:
         changed = cs.save_rpi_folder(db, typed, data_dir)
     except cs.SettingsError as err:

@@ -38,7 +38,7 @@ STATUS_FAILED = "Connection Failed"
 MAX_PATH_LENGTH = 200          # leaves room for a probe/asset file name inside the classic 260-character limit
 _BAD_CHARS = re.compile(r'[\x00-\x1f<>"|?*]')
 _HOST_RE = re.compile(r"^[A-Za-z0-9](?:[A-Za-z0-9._-]{0,251}[A-Za-z0-9])?$")
-_RESERVED = {"CON", "PRN", "AUX", "NUL", *(f"COM{i}" for i in range(1, 10)), *(f"LPT{i}" for i in range(1, 10)),
+_RESERVED = {"CON", "PRN", "AUX", "NUL", "CONIN$", "CONOUT$", *(f"COM{i}" for i in range(1, 10)), *(f"LPT{i}" for i in range(1, 10)),
              *(f"{p}{d}" for p in ("COM", "LPT") for d in "\u00b9\u00b2\u00b3")}
 
 
@@ -102,12 +102,40 @@ def _is_inside(path: PureWindowsPath, root: PureWindowsPath) -> bool:
     return len(p) >= len(r) and p[: len(r)] == r
 
 
+def _ipv4_value(text: str) -> int | None:
+    """The number an IPv4 host spelling stands for, the way Windows reads it (`127.1`, `0x7f000001`,
+    `2130706433`, `0`, octal parts), or None if it is not such a spelling."""
+    parts = text.split(".")
+    if not 1 <= len(parts) <= 4 or any(p == "" for p in parts):
+        return None
+    numbers = []
+    for part in parts:
+        try:
+            base = 16 if part.lower().startswith("0x") else 8 if len(part) > 1 and part.startswith("0") else 10
+            numbers.append(int(part, base))
+        except ValueError:
+            return None
+    value = 0
+    for number in numbers[:-1]:
+        if number > 255:
+            return None
+        value = value * 256 + number
+    last_bytes = 5 - len(numbers)
+    if numbers[-1] >= 256 ** last_bytes:
+        return None
+    return value * 256 ** last_bytes + numbers[-1]
+
+
 def _is_this_computer(host: str) -> bool:
-    """A network path to THIS machine (localhost, 127.x, its own name) would reach any local folder
-    through an admin share and bypass the protected-folder check."""
+    """A network path to THIS machine (localhost, any 127.x, `0`, a decimal/hex/short IPv4 spelling of
+    those, or its own name) would reach any local folder through an admin share and bypass the
+    protected-folder check. (The RPI folder is also checked by file identity when it is opened.)"""
     h = host.casefold()
     own = (os.environ.get("COMPUTERNAME") or "").casefold()
-    return h == "localhost" or h.startswith("localhost.") or h.startswith("127.") or bool(own and h.split(".")[0] == own)
+    if h == "localhost" or h.startswith("localhost.") or bool(own and h.split(".")[0] == own):
+        return True
+    value = _ipv4_value(h)
+    return value is not None and (value >> 24) in (0, 127)
 
 
 def validate_shared_folder(text: str, label: str = "", forbidden_roots: tuple = ()) -> str:

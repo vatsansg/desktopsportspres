@@ -99,6 +99,7 @@ class Assessment:
     label: str                        # New | Updated | Removed in cloud | Already processed | Not applicable
     reason: str
     revisions: int                    # how many log entries there are for this path
+    local_status: str = ""            # the latest local record for this path: Success | Deleted | "" (none)
 
 
 @dataclass(frozen=True)
@@ -212,9 +213,10 @@ def compare(parsed: ParsedChangeLog, event_structure: structure.EventStructure,
                                   latest.timestamp_text, latest.timestamp, NOT_APPLICABLE, NOT_APPLICABLE, where, count))
         else:
             table, led, name = where
-            action, label, reason = _decide(latest, local.get(key))
+            have = local.get(key)
+            action, label, reason = _decide(latest, have)
             out.append(Assessment(latest.path, table, led, name, latest.status, latest.timestamp_text, latest.timestamp,
-                                  action, label, reason, count))
+                                  action, label, reason, count, have.status if have else ""))
     out.sort(key=lambda a: (a.action == NOT_APPLICABLE, a.table if a.table is not None else 10**6,
                             LED_ORDER.get(a.led_type or "", 99), a.path.casefold(), a.path))
     return Comparison(tuple(out), parsed.skipped, len(parsed.entries), parsed.source_name)

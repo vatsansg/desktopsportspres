@@ -134,7 +134,7 @@ def test_a_failed_write_leaves_no_temporary_file_and_no_half_file(tmp_path, monk
     monkeypatch.setattr(localfiles.os, "replace", boom)
     with pytest.raises(localfiles.LocalFileError) as err:
         localfiles.write_atomic(tmp_path, "a.png", b"x")
-    assert "could not be written" in str(err.value) and list(tmp_path.iterdir()) == []
+    assert "could not be replaced" in str(err.value) and list(tmp_path.iterdir()) == []
 
 
 def test_delete_removes_only_that_file_and_reports_a_missing_one(tmp_path):
@@ -286,7 +286,7 @@ def test_the_rpi_file_is_downloaded_into_the_default_rpi_folder(ev, cfg):
     put_log(ev, [("RPI/HOME_Look.png", T1, "New")])
     check(ev)
     html = page(ev)
-    assert "Download RPI Files (1)" in html and str(cfg.data_dir / "RPI") in html
+    assert "Update RPI Files (1)" in html and str(cfg.data_dir / "RPI") in html
     assert html.count("btn-primary") == 1                               # still only one orange action on the page
     out = download(ev).get_data(as_text=True)
     assert "RPI files: 1 downloaded, 0 removed, 0 failed." in out
@@ -364,7 +364,7 @@ def test_one_bad_file_never_stops_the_others_and_is_tried_again_next_time(ev, cf
     assert sorted(h["status"] for h in history(cfg)) == ["Failure", "Success"]
     ex = db_rows(cfg, "SELECT category, operation, file_name FROM exception_log")
     assert ex == [{"category": "Missing folder", "operation": "RPI Files", "file_name": "missing.png"}]
-    assert "Download RPI Files (1)" in page(ev)                           # the failure did not count as processed
+    assert "Update RPI Files (1)" in page(ev)                           # the failure did not count as processed
     put(ev, "rpi/missing.png", PNG)
     assert "1 downloaded, 0 removed, 0 failed" in download(ev).get_data(as_text=True)
 

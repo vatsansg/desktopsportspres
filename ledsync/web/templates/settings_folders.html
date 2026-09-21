@@ -19,7 +19,7 @@
     <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
     <div class="field">
       <label for="rpi_folder">RPI folder</label>
-      <input id="rpi_folder" name="rpi_folder" type="text" value="{{ typed }}" maxlength="200" autocomplete="off"
+      <input id="rpi_folder" name="rpi_folder" type="text" value="{{ typed }}" maxlength="300" autocomplete="off"
              spellcheck="false" class="mono-input" {% if not error %}autofocus{% endif %}
              aria-describedby="{% if error %}form-error {% endif %}rpi-hint">
       <p id="rpi-hint" class="hint">Files in the event's <span class="mono">RPI</span> folder are saved here. Leave the box empty to use the
