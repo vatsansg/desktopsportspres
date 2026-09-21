@@ -61,7 +61,7 @@ Live checks (read-only, run by Claude 21/09/26 and re-runnable): `.\.venv\Script
 
 | Total cases | Passed | Failed | Blocked | Not yet run |
 |---|---|---|---|---|
-| 66 | 50 (42 automated groups covering 231 new pytest cases; 7 live checks against real Azure; 1 rendered-page group) | 0 | 0 | 16 manual (TC-M01 – TC-M16, awaiting the user's run) |
+| 66 | 66 (42 automated groups covering 231 new pytest cases; 7 live checks against real Azure; 1 rendered-page group; 16 manual TC-M01 – TC-M16 run by the owner on 21/09/26: "All ok") | 0 | 0 | 0 |
 
 `.\.venv\Scripts\python -m pytest -q` → **649 passed, 7 skipped** (the 7 are the live tests, which need `--live`); `--live` → **7 passed** against real Azure. New dependency: `azure-storage-blob` 12.30.2 (24 packages in the runtime set; `pip-audit`: no known vulnerabilities).
 
@@ -107,7 +107,7 @@ Live checks (read-only, run by Claude 21/09/26 and re-runnable): `.\.venv\Script
 
 | ID | Description | Severity | Status |
 |---|---|---|---|
-| F-27 | Manual checks TC-M01 – TC-M16 pending the owner's run. | Info | Awaiting user |
+| F-27 | Manual checks TC-M01 – TC-M16 run by the owner. | Info | Closed — passed |
 | F-28 | **Key stored in plain text (owner decision).** Anyone who can read `ledsync.db` (default: only this Windows user's profile) gets a key with broad read *and write* power over the storage account. Read-only is a rule this application keeps, not something the key enforces. Recommended before venue deployment: a read-only, container-scoped credential from the web-app team, and/or Windows encryption (one place to change). | Medium | Accepted by owner; revisit before Phase 13 |
 | F-29 | **Real cloud naming differs from the BRD** (found while validating): the change-log file is `_ledassetschangelog.csv` (with an "s"); cloud folders are lowercase (`Table 1/inner`, `outer`, `mainled`) while change-log entries use `Inner/Outer/MainLED`; there are `keepalive.txt` placeholders and a file without an extension (`Table 1/mainled/HOME_Look`). Decisions needed at Phase 5/6: case-insensitive path matching, local folder naming, ignoring `keepalive.txt`. | Medium | **Owner decision needed at Step 5/6** |
 | F-30 | Persist the verified `(container, folder)` per event and use it (never `config.storage_url`) for every later download; add blob properties, listing under a folder, and streamed downloads with a size cap (needed Phase 6–7). | Info | Carried |
@@ -119,4 +119,4 @@ Live checks (read-only, run by Claude 21/09/26 and re-runnable): `.\.venv\Script
 | Role | Name | Date | Outcome |
 |---|---|---|---|
 | Independent Solution Architect review | Independent review agent (fresh context) | 21/09/26 | **Approved with notes** — no blockers; ran the suite and probed with its own fakes and the real SDK over a local no-network transport; the access key never leaked on any path tried. Ten "fix now" findings resolved (crash and looseness in address verification, case-insensitive Azure lookup, Test Connection honesty, dev-only fallback and its validation, echo of pasted keys, offline hang, evadable read-only test, bfcache busy state, SDK log noise, generic `read_blob`); notes carried as F-30/F-31. The fixes have not had a second independent pass |
-| User (Vatsan) go-ahead | | | Pending |
+| User (Vatsan) go-ahead | Vatsan | 21/09/26 | Approved — "All ok, close pending items and move to next step" |
