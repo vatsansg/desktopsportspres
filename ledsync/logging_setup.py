@@ -28,6 +28,8 @@ def setup_logging(data_dir: Path | None = None) -> Path | None:
     # Werkzeug's per-request access log would record the one-time launch URL
     # (web/security.py). Warnings and errors are still logged.
     logging.getLogger("werkzeug").setLevel(logging.WARNING)
+    # The Azure SDK logs every request (URL, headers) at INFO - noise at best, so warnings and errors only.
+    logging.getLogger("azure").setLevel(logging.WARNING)
     for h in list(root.handlers):
         root.removeHandler(h)
 

@@ -225,11 +225,10 @@ def test_event_ids_differing_only_by_case_are_the_same_event(app, azure, cfg, lo
     obj = json.loads((FILES / "2000_second_event.json").read_text())
     obj["eventId"] = "EVT9"
     serve_event(azure, obj, folder="EVT9 - Second Test Event")
-    register(logged_in, "EVT9")
-    assert register(logged_in, "evt9")                                               # a different spelling typed
-    # same GUID -> a harmless notice, not a second event
-    azure.blobs[("2026", "evt9 - Second Test Event/_GUID.json")] = azure.blobs[("2026", "EVT9 - Second Test Event/_GUID.json")]
-    register(logged_in, "evt9")
+    assert register(logged_in, "EVT9").status_code == 302
+    # typed in another case: Azure finds the SAME folder, the GUID matches -> a harmless notice, not a second event
+    assert register(logged_in, "evt9").status_code == 302
+    assert "already registered" in dash(logged_in)
     assert [e["event_id"] for e in events(cfg)] == ["EVT9"]
 
 
@@ -239,8 +238,8 @@ def test_a_different_case_spelling_with_a_new_guid_leads_to_re_registration_of_t
     serve_event(azure, obj, folder="EVT9 - Second Test Event")
     register(logged_in, "EVT9")
     newer = dict(obj, exportGuid="11111111-2222-4333-8444-555555555555")
-    serve_event(azure, newer, folder="evt9 - Second Test Event")                     # typed in lower case
-    resp = register(logged_in, "evt9")
+    serve_event(azure, newer, folder="EVT9 - Second Test Event")                     # the web app exported it again
+    resp = register(logged_in, "evt9")                                               # ...and the operator types lower case
     assert resp.status_code == 302 and resp.headers["Location"].endswith("/events/reregister")
     assert "EVT9" in logged_in.get("/events/reregister").get_data(as_text=True)      # the spelling on record
     assert [e["event_id"] for e in events(cfg)] == ["EVT9"]
@@ -393,7 +392,7 @@ def test_settings_forms_need_csrf(logged_in):
 
 def test_development_env_source_is_labelled(app, logged_in):
     html = settings_page(logged_in)                                                   # the fixture supplies env values
-    assert "development .env" in html and "Type a key here to save your own" in html
+    assert "the process environment" in html and "Type a key here to save your own" in html
 
 
 # --- Test Connection ----------------------------------------------------------------------------------------------------

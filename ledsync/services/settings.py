@@ -17,6 +17,8 @@ SCOPE GUARD: the administrator credential (`admin_*` keys, BRD 6.1) is NOT handl
 this module refuses to touch any key it does not own; only `services/auth.py` may.
 """
 
+import base64
+import binascii
 import re
 import sqlite3
 from dataclasses import dataclass, field
@@ -43,16 +45,48 @@ class SettingsError(ValueError):
 
 
 @dataclass(frozen=True)
+class CloudView:
+    """What a PAGE may know about the settings: everything except the key itself, so a future
+    template edit cannot print it."""
+    account: str
+    container: str
+    has_key: bool
+    configured: bool
+    account_source: str     # "" = saved in Settings, otherwise where the development value came from
+    key_source: str
+
+    @property
+    def account_from_dev_env(self) -> bool:
+        return bool(self.account_source)
+
+    @property
+    def key_from_dev_env(self) -> bool:
+        return bool(self.key_source)
+
+
+@dataclass(frozen=True)
 class CloudSettings:
     account: str = ""
     container: str = ""
     access_key: str = field(default="", repr=False)   # never appears in a repr, log or page
-    account_from_dev_env: bool = False
-    key_from_dev_env: bool = False
+    account_source: str = ""
+    key_source: str = ""
+
+    @property
+    def account_from_dev_env(self) -> bool:
+        return bool(self.account_source)
+
+    @property
+    def key_from_dev_env(self) -> bool:
+        return bool(self.key_source)
 
     @property
     def has_key(self) -> bool:
         return bool(self.access_key)
+
+    def public(self) -> CloudView:
+        return CloudView(self.account, self.container, self.has_key, self.configured,
+                         self.account_source, self.key_source)
 
     @property
     def configured(self) -> bool:
@@ -66,13 +100,15 @@ class CloudSettings:
 # --- the single place the key is read/written ---------------------------------------------
 
 def _get(conn: sqlite3.Connection, key: str) -> str:
-    assert key in OWNED_KEYS, "settings.py may only touch its own keys"
+    if key not in OWNED_KEYS:
+        raise PermissionError("settings.py may only touch its own keys")
     row = conn.execute("SELECT setting_value FROM application_settings WHERE setting_name = ?", (key,)).fetchone()
     return (row["setting_value"] or "") if row else ""
 
 
 def _put(conn: sqlite3.Connection, key: str, value: str) -> None:
-    assert key in OWNED_KEYS, "settings.py may only touch its own keys"
+    if key not in OWNED_KEYS:
+        raise PermissionError("settings.py may only touch its own keys")
     conn.execute(
         "INSERT INTO application_settings (setting_name, setting_value) VALUES (?, ?) "
         "ON CONFLICT(setting_name) DO UPDATE SET setting_value = excluded.setting_value",
@@ -91,6 +127,8 @@ def _write_secret(conn: sqlite3.Connection, secret: str) -> None:
 # --- validation ---------------------------------------------------------------------------------
 
 def validate_account(value: str) -> str:
+    if looks_like_secret(value):                       # refuse (never store or show) a key pasted in the wrong box
+        raise SettingsError("The storage account name must be 3 to 24 lower-case letters and numbers.")
     value = (value or "").strip().lower()
     if not _ACCOUNT_RE.match(value):
         raise SettingsError("The storage account name must be 3 to 24 lower-case letters and numbers.")
@@ -98,6 +136,9 @@ def validate_account(value: str) -> str:
 
 
 def validate_container(value: str) -> str:
+    if looks_like_secret(value):
+        raise SettingsError("The container name must be 3 to 63 lower-case letters, numbers and single hyphens "
+                            "(for example 2026).")
     value = (value or "").strip().lower()
     if not value:
         return ""
@@ -109,10 +150,27 @@ def validate_container(value: str) -> str:
 
 def validate_key(value: str) -> str:
     value = (value or "").strip()
-    if not _KEY_RE.match(value):
+    try:
+        ok = bool(_KEY_RE.match(value)) and bool(base64.b64decode(value, validate=True))
+    except (binascii.Error, ValueError):
+        ok = False
+    if not ok:
         raise SettingsError("That does not look like a storage account access key "
                             "(it should be about 88 letters, numbers, + / and =).")
     return value
+
+
+def looks_like_secret(value: str) -> bool:
+    """Long, key-shaped text: 40+ base64/URL-safe characters that include an upper-case letter or
+    + / =. (Real names of accounts, containers and events are short and lower-case or numeric.)"""
+    text = (value or "").strip()
+    return len(text) >= 40 and bool(re.fullmatch(r"[A-Za-z0-9+/=_-]+", text)) and bool(re.search(r"[A-Z+/=]", text))
+
+
+def redact_if_secret_like(value: str) -> str:
+    """Text about to be shown back in a form field. A key pasted into the wrong field (Event ID,
+    account, container) must never be echoed into the page, so anything key-shaped is blanked."""
+    return "" if looks_like_secret(value) else (value or "")
 
 
 # --- public API ------------------------------------------------------------------------------------
@@ -121,16 +179,26 @@ def load_cloud(conn: sqlite3.Connection, dotenv: dict[str, str] | None = None) -
     """Saved settings, falling back per field to the development .env / environment when a
     field has not been saved (so a developer need not retype the key in Settings)."""
     account, container, key = _get(conn, KEY_ACCOUNT), _get(conn, KEY_CONTAINER), _read_secret(conn)
-    dev_account = dev_key = False
+    account_source = key_source = ""
     if not account:
-        account = app_config.dev_setting(DEV_ACCOUNT, dotenv).strip().lower()
-        dev_account = bool(account)
+        account, account_source = _dev_value(DEV_ACCOUNT, dotenv, validate_account)
     if not container:
-        container = app_config.dev_setting(DEV_CONTAINER, dotenv).strip().lower()
+        container, _ = _dev_value(DEV_CONTAINER, dotenv, validate_container)
     if not key:
-        key = app_config.dev_setting(DEV_KEY, dotenv).strip()
-        dev_key = bool(key)
-    return CloudSettings(account, container, key, dev_account, dev_key)
+        key, key_source = _dev_value(DEV_KEY, dotenv, validate_key)
+    return CloudSettings(account, container, key, account_source, key_source)
+
+
+def _dev_value(name: str, dotenv, validator) -> tuple[str, str]:
+    """A development fallback value, held to the SAME validation as anything typed into Settings
+    (a hostile or mistyped variable must never redirect signed requests to another host)."""
+    value, source = app_config.dev_setting_with_source(name, dotenv)
+    if not value.strip():
+        return "", ""
+    try:
+        return validator(value), source
+    except SettingsError:
+        return "", ""
 
 
 def save_cloud(conn: sqlite3.Connection, account: str, container: str, new_key: str | None) -> list[str]:

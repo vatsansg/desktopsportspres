@@ -62,7 +62,7 @@ def test_finds_the_real_test_event_folder_from_just_its_id(storage):
 
 def test_downloads_and_fully_validates_the_real_guid_json(storage):
     loc = storage.find_event("1000", CONTAINER)
-    data = storage.read_blob(loc.container, loc.guid_blob_path, reg.MAX_CONFIG_BYTES)
+    data = storage.read_blob(loc, "_GUID.json", reg.MAX_CONFIG_BYTES)
     config = reg.parse_event_config(data)
     cloud.verify_storage_location(config, ACCOUNT, loc)              # S-14 against the real address
     assert (config.event_id, config.event_name) == ("1000", "Star contender Doha")

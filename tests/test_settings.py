@@ -159,9 +159,9 @@ def test_the_key_is_never_in_a_repr_or_str_of_the_settings(conn):
 
 def test_it_refuses_to_read_or_write_any_key_it_does_not_own(conn):
     for key in ("admin_password", "admin_username", "anything_else"):
-        with pytest.raises(AssertionError):
+        with pytest.raises(PermissionError):
             cs._get(conn, key)
-        with pytest.raises(AssertionError):
+        with pytest.raises(PermissionError):
             cs._put(conn, key, "x")
 
 

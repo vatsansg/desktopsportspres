@@ -195,4 +195,4 @@ def test_the_two_settings_owners_never_reference_each_others_keys():
     assert not re.search(r"admin_password|admin_username|Admin@123|KEY_PASSWORD|KEY_USERNAME", settings_src.replace("`admin_*`", ""))
     # ... and auth.py must not touch the Azure key or cloud settings.
     assert not re.search(r"cloud_|KEY_ACCESS|KEY_ACCOUNT|KEY_CONTAINER|access_key", auth_src)
-    assert 'assert key in OWNED_KEYS' in settings_src        # settings.py refuses any key it does not own
+    assert 'raise PermissionError("settings.py may only touch its own keys")' in settings_src   # a real raise: survives python -O

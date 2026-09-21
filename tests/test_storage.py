@@ -101,7 +101,7 @@ def test_guid_blob_path_and_recorded_address():
 def test_reads_a_blob():
     storage, fake = make()
     fake.put("2026", "1000 - Doha/_GUID.json", b'{"a": 1}')
-    assert storage.read_blob("2026", "1000 - Doha/_GUID.json", 1000) == b'{"a": 1}'
+    assert storage.read_blob(EventLocation("2026", "1000 - Doha"), "_GUID.json", 1000) == b'{"a": 1}'
 
 
 def test_a_huge_blob_is_never_fully_downloaded():
@@ -109,7 +109,7 @@ def test_a_huge_blob_is_never_fully_downloaded():
     corrupt blob cannot fill memory - and the parser then rejects it as too large."""
     storage, fake = make()
     fake.put("2026", "1000 - Doha/_GUID.json", b"x" * 10_000_000)
-    data = storage.read_blob("2026", "1000 - Doha/_GUID.json", reg.MAX_CONFIG_BYTES)
+    data = storage.read_blob(EventLocation("2026", "1000 - Doha"), "_GUID.json", reg.MAX_CONFIG_BYTES)
     assert len(data) == reg.MAX_CONFIG_BYTES + 1
     assert fake.downloads[-1][2:] == (0, reg.MAX_CONFIG_BYTES + 1)
     with pytest.raises(reg.RegistrationError, match="too large"):
@@ -120,7 +120,7 @@ def test_folder_without_a_guid_file_gets_a_specific_helpful_message():
     storage, fake = make()
     fake.put("2026", "1000 - Doha/Table 1/Inner/a.png", b"x")
     with pytest.raises(StorageError) as exc:
-        storage.read_blob("2026", "1000 - Doha/_GUID.json", 1000)
+        storage.read_blob(EventLocation("2026", "1000 - Doha"), "_GUID.json", 1000)
     assert exc.value.category == exceptions.MISSING_FOLDER
     assert "no _GUID.json" in exc.value.message and "Export Event" in exc.value.message
 
@@ -175,7 +175,7 @@ def test_errors_from_every_operation_surface_as_storage_errors(op):
     with pytest.raises(StorageError) as exc:
         {"list_containers": lambda: storage.test_connection(""),
          "find": lambda: storage.find_event("1000", "2026"),
-         "read": lambda: storage.read_blob("2026", "1000 - Doha/_GUID.json", 100),
+         "read": lambda: storage.read_blob(EventLocation("2026", "1000 - Doha"), "_GUID.json", 100),
          "test": lambda: storage.test_connection("2026")}[op]()
     assert exc.value.category == exceptions.STORAGE_CONNECTIVITY and SECRET not in exc.value.message
 
@@ -184,7 +184,7 @@ def test_a_wrong_key_is_a_permission_error_from_any_operation():
     storage, fake = make(key="WRONG" + "A" * 83)
     fake.put("2026", "1000 - Doha/_GUID.json", b"{}")
     for call in (lambda: storage.test_connection("2026"), lambda: storage.find_event("1000", "2026"),
-                 lambda: storage.read_blob("2026", "1000 - Doha/_GUID.json", 100)):
+                 lambda: storage.read_blob(EventLocation("2026", "1000 - Doha"), "_GUID.json", 100)):
         with pytest.raises(StorageError) as exc:
             call()
         assert exc.value.category == exceptions.PERMISSION
@@ -206,31 +206,110 @@ def test_the_real_client_builds_offline_with_bounded_timeouts_and_retries():
     assert st.CONNECT_TIMEOUT <= 10 and st.READ_TIMEOUT <= 30            # an offline venue fails fast
 
 
-# --- READ-ONLY guarantee (BRD 4 / Business Rule 13) ----------------------------------------------------------
+# --- READ-ONLY guarantee (BRD 4 / Business Rule 13) - AST based, so aliasing and string tricks do not evade it ---
 
-FORBIDDEN = ("upload_blob", "delete_blob", "delete_blobs", "set_blob_metadata", "set_blob_tags", "set_http_headers",
-             "create_container", "delete_container", "start_copy_from_url", "begin_copy", "abort_copy",
-             "stage_block", "commit_block_list", "append_block", "create_snapshot", "set_standard_blob_tier",
-             "set_premium_page_blob_tier", "undelete_blob", "acquire_lease", "set_service_properties",
-             "create_append_blob", "create_page_blob", "upload_page", "clear_page", "set_immutability_policy",
-             "generate_account_sas", "generate_container_sas", "generate_blob_sas")
+import ast
+
+APP = ROOT / "ledsync"
+
+# Every mutating Azure Blob operation (exact names), plus SAS generation. Forbidden in ALL application code.
+FORBIDDEN_CALLS = {
+    "upload_blob", "delete_blob", "delete_blobs", "set_blob_metadata", "set_blob_tags", "set_http_headers",
+    "create_container", "delete_container", "start_copy_from_url", "begin_copy", "abort_copy", "stage_block",
+    "stage_block_from_url", "commit_block_list", "append_block", "append_block_from_url", "create_snapshot",
+    "set_standard_blob_tier", "set_premium_page_blob_tier", "undelete_blob", "acquire_lease", "renew_lease",
+    "release_lease", "break_lease", "change_lease", "set_service_properties", "create_append_blob",
+    "create_page_blob", "upload_page", "upload_pages_from_url", "clear_page", "resize_blob", "seal_append_blob",
+    "set_blob_expiry", "set_legal_hold", "set_immutability_policy", "delete_immutability_policy",
+    "set_container_metadata", "set_container_access_policy", "set_blob_legal_hold", "restore_container",
+    "generate_account_sas", "generate_container_sas", "generate_blob_sas", "get_user_delegation_key",
+    "send_request", "from_connection_string", "from_blob_url", "upload_blob_from_url", "start_copy",
+}
+PRIVATE_SDK_ATTRS = {"_client", "_pipeline", "pipeline", "_config", "_hosts", "_query_str"}
+FORBIDDEN_IMPORTS = ("requests", "urllib.request", "http.client", "httpx", "aiohttp", "socket", "ssl", "importlib",
+                     "urllib3")
+DYNAMIC_BUILTINS = {"getattr", "setattr", "delattr", "__import__", "eval", "exec", "compile", "globals", "vars"}
+# getattr is only allowed with a literal name from this list (the one exception: winreg in platform_checks.py)
+LITERAL_GETATTR_OK = {"name", "status_code", "frozen"}
+
+# Everything storage.py may call as an attribute: the READ operations of the SDK, plus plain Python helpers.
+SDK_READ_CALLS = {"list_containers", "get_container_client", "walk_blobs", "get_blob_client", "download_blob", "readall"}
+PYTHON_HELPER_CALLS = {"__init__", "_containers_to_search", "_folders_for_event", "_search",
+                       "_year_containers_newest_first", "append", "blob_path", "casefold", "compile", "endswith",
+                       "fullmatch", "getLogger", "search", "split", "startswith"}
 
 
-def test_application_source_contains_no_azure_write_or_sas_call():
-    """Structural guarantee: no module in the application mentions any mutating Azure operation."""
+def _modules():
+    for path in sorted(APP.rglob("*.py")):
+        yield path, ast.parse(path.read_text(encoding="utf-8"))
+
+
+def test_no_application_code_calls_a_mutating_or_signing_azure_operation():
     hits = []
-    for path in (ROOT / "ledsync").rglob("*.py"):
-        text = path.read_text(encoding="utf-8")
-        hits += [f"{path.name}:{name}" for name in FORBIDDEN if name in text]
+    for path, tree in _modules():
+        for node in ast.walk(tree):
+            if isinstance(node, ast.Call) and isinstance(node.func, ast.Attribute) and node.func.attr in FORBIDDEN_CALLS:
+                hits.append(f"{path.name}:{node.lineno} {node.func.attr}")
+            if isinstance(node, ast.Attribute) and node.attr in PRIVATE_SDK_ATTRS:
+                hits.append(f"{path.name}:{node.lineno} private SDK attribute {node.attr}")
     assert hits == []
 
 
-def test_storage_module_only_calls_read_operations():
-    calls = set(re.findall(r"\.(\w+)\(", (ROOT / "ledsync" / "services" / "storage.py").read_text(encoding="utf-8")))
-    sdk_calls = calls & {"list_containers", "get_container_client", "walk_blobs", "get_blob_client", "download_blob",
-                         "readall", "get_blob_properties", "upload_blob", "delete_blob"}
-    assert sdk_calls <= {"list_containers", "get_container_client", "walk_blobs", "get_blob_client",
-                         "download_blob", "readall"}
+def test_no_dynamic_attribute_access_that_could_hide_a_write_call():
+    hits = []
+    for path, tree in _modules():
+        for node in ast.walk(tree):
+            if isinstance(node, ast.Call) and isinstance(node.func, ast.Name) and node.func.id in DYNAMIC_BUILTINS:
+                second = node.args[1] if len(node.args) > 1 else None
+                literal = isinstance(second, ast.Constant) and isinstance(second.value, str)
+                ok = node.func.id == "getattr" and (
+                    (literal and second.value in LITERAL_GETATTR_OK)
+                    or path.name == "platform_checks.py")                     # winreg hive lookup, no Azure involved
+                if not ok:
+                    hits.append(f"{path.name}:{node.lineno} {node.func.id}")
+    assert hits == []
+
+
+def test_no_other_http_client_and_azure_is_imported_only_by_the_storage_module():
+    hits = []
+    for path, tree in _modules():
+        for node in ast.walk(tree):
+            names = []
+            if isinstance(node, ast.Import):
+                names = [a.name for a in node.names]
+            elif isinstance(node, ast.ImportFrom):
+                names = [node.module or ""]
+            for name in names:
+                if name.startswith(FORBIDDEN_IMPORTS):
+                    hits.append(f"{path.name}:{node.lineno} imports {name}")
+                if name.startswith("azure") and path.name != "storage.py":
+                    hits.append(f"{path.name}:{node.lineno} imports {name} outside storage.py")
+    assert hits == []
+
+
+def test_storage_module_calls_exactly_the_read_operations_and_nothing_else():
+    tree = ast.parse((APP / "services" / "storage.py").read_text(encoding="utf-8"))
+    calls = {n.func.attr for n in ast.walk(tree) if isinstance(n, ast.Call) and isinstance(n.func, ast.Attribute)}
+    assert calls <= SDK_READ_CALLS | PYTHON_HELPER_CALLS, calls - (SDK_READ_CALLS | PYTHON_HELPER_CALLS)
+    assert SDK_READ_CALLS <= calls                          # and it really does use them (guards the test itself)
+
+
+def test_the_ast_guard_actually_catches_evasions():
+    """The guard is only worth something if it fails on the tricks the old substring test missed."""
+    for snippet in ("client.upload_blob(x)", "svc.delete_container('a')", "c._client.blob.delete()",
+                    "getattr(c, 'upload_' + 'blob')(x)", "import requests", "import urllib.request",
+                    "from azure.storage.blob import BlobClient"):
+        tree = ast.parse(snippet)
+        found = any(
+            (isinstance(n, ast.Call) and isinstance(n.func, ast.Attribute) and n.func.attr in FORBIDDEN_CALLS)
+            or (isinstance(n, ast.Attribute) and n.attr in PRIVATE_SDK_ATTRS)
+            or (isinstance(n, ast.Call) and isinstance(n.func, ast.Name) and n.func.id == "getattr"
+                and not (isinstance(n.args[1], ast.Constant) and n.args[1].value in LITERAL_GETATTR_OK))
+            or (isinstance(n, (ast.Import, ast.ImportFrom)) and (
+                any(a.name.startswith(FORBIDDEN_IMPORTS) or a.name.startswith("azure") for a in getattr(n, "names", []))
+                or (getattr(n, "module", "") or "").startswith("azure")))
+            for n in ast.walk(tree))
+        assert found, snippet
 
 
 def test_a_write_attempt_on_the_service_would_fail_loudly_in_tests():

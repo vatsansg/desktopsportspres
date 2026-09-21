@@ -76,8 +76,17 @@ def read_dotenv(path: Path | None = None) -> dict[str, str]:
     return values
 
 
-def dev_setting(name: str, dotenv: dict[str, str] | None = None) -> str:
-    """A development-time value: process environment first, then the .env file."""
+def dev_setting_with_source(name: str, dotenv: dict[str, str] | None = None) -> tuple[str, str]:
+    """(value, where it came from): the process environment first, then the .env file.
+    DEVELOPMENT ONLY - an installed (frozen) build ignores both, so a stray variable on a venue
+    machine can never silently configure it."""
+    if getattr(sys, "frozen", False):
+        return "", ""
     if os.environ.get(name):
-        return os.environ[name]
-    return (dotenv if dotenv is not None else read_dotenv()).get(name, "")
+        return os.environ[name], "the process environment"
+    value = (dotenv if dotenv is not None else read_dotenv()).get(name, "")
+    return (value, "the development .env file") if value else ("", "")
+
+
+def dev_setting(name: str, dotenv: dict[str, str] | None = None) -> str:
+    return dev_setting_with_source(name, dotenv)[0]

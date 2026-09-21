@@ -194,3 +194,7 @@ input[type="file"]::file-selector-button {
 .settings-section { margin: 0 0 0.5rem; }
 button:disabled { opacity: 0.6; cursor: progress; }
 a.btn-secondary[href] { text-decoration: none; }
+
+/* A definition list inside a form panel is a plain summary, not a second box. */
+.panel .kv { background: transparent; border: 0; border-top: 1px solid var(--border-subtle); border-radius: 0;
+             padding: 1.25rem 0 0; margin: 1.5rem 0 1.5rem; }

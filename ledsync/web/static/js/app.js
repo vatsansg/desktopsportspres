@@ -34,3 +34,14 @@ document.addEventListener("submit", function (event) {
     if (submitter && submitter.classList.contains("btn-primary")) { submitter.textContent = text; }
   }, 0);
 });
+
+// Back/forward can restore this page from the browser's cache with the busy state still applied.
+window.addEventListener("pageshow", function (event) {
+  if (!event.persisted) return;
+  var forms = document.querySelectorAll("form[data-busy-text]");
+  for (var i = 0; i < forms.length; i++) {
+    forms[i].removeAttribute("aria-busy");
+    var buttons = forms[i].querySelectorAll('button[type="submit"]');
+    for (var j = 0; j < buttons.length; j++) { buttons[j].disabled = false; }
+  }
+});

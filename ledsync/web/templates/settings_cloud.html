@@ -28,7 +28,7 @@
              spellcheck="false" required {% if not error and not notice %}autofocus{% endif %}
              aria-describedby="{% if error %}form-error {% endif %}account-hint">
       <p id="account-hint" class="hint">The account name only, for example <span class="mono">sasportspresentation</span>.
-        {% if saved.account_from_dev_env %}<strong>Currently supplied by the development .env file.</strong>{% endif %}</p>
+        {% if saved.account_source %}<strong>Currently supplied by {{ saved.account_source }}.</strong>{% endif %}</p>
     </div>
 
     <div class="field">
@@ -42,13 +42,13 @@
     {{ password_field("access_key", "access_key", "Storage account access key", autocomplete="off",
                       hint=("Saved. Leave blank to keep it; type a new key to replace it. The key is never shown again."
                             if saved.has_key and not saved.key_from_dev_env else
-                            ("Currently supplied by the development .env file. Type a key here to save your own."
+                            ("Currently supplied by " ~ saved.key_source ~ ". Type a key here to save your own."
                              if saved.key_from_dev_env else "Not set yet. Paste the account access key from the Azure portal.")),
                       describedby=("form-error" if error else None)) }}
 
     <dl class="kv">
       <dt>Access key</dt>
-      <dd>{% if saved.key_from_dev_env %}From the development .env file (not saved in Settings)
+      <dd>{% if saved.key_source %}From {{ saved.key_source }} (not saved in Settings)
           {% elif saved.has_key %}<span class="badge badge-synced">Saved</span>
           {% else %}<span class="badge badge-attention">Not set</span>{% endif %}</dd>
       <dt>Event storage path</dt>

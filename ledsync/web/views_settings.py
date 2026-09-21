@@ -16,8 +16,11 @@ def _ctx(**extra):
 
 
 def _view_model(saved: cs.CloudSettings, **extra):
-    return _ctx(saved=saved, account=extra.pop("account", saved.account),
-                container=extra.pop("container", saved.container), **extra)
+    """Pages get a KEY-LESS view of the settings, and typed text is never echoed if it is key-shaped
+    (a key pasted into the wrong field must not be reflected into the page)."""
+    account = cs.redact_if_secret_like(extra.pop("account", saved.account))
+    container = cs.redact_if_secret_like(extra.pop("container", saved.container))
+    return _ctx(saved=saved.public(), account=account, container=container, **extra)
 
 
 @bp.get("")
@@ -85,6 +88,8 @@ def _test_connection(db, saved, account, container, new_key):
         message += f" Container {candidate.container} was not found."
     elif report.preferred_container_found:
         message += f" Container {candidate.container} found."
+    message += " Nothing has been saved" + (
+        " \u2014 type the key again and press Save to keep these settings." if new_key.strip() else ".")
     oplog.record(db, "Cloud Storage Test", "Success", f"Connected to {report.account} ({len(report.containers)} container(s)).")
     return render_template("settings_cloud.html", **_view_model(
         saved, account=candidate.account, container=candidate.container, notice=message)), 200

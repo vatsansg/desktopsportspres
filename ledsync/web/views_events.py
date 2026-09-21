@@ -53,6 +53,8 @@ def new_post():
     settings = None
     source = None
     try:
+        if cloud_settings.looks_like_secret(entered):      # e.g. the account key pasted into the wrong box
+            raise reg.InputError("That does not look like an Event ID. Enter the number shown in the web application.")
         event_id = reg.validate_event_id_input(entered)
         settings = cloud_settings.load_cloud(db)
         if not settings.configured:
@@ -71,11 +73,11 @@ def new_post():
     except StorageError as err:
         exceptions.record(db, err.category, "Register Event", err.message, event_id=event_id,
                           source=f"Azure Storage: {settings.account}" if settings else None)
-        return render_template("event_new.html", **_ctx(entered_id=entered.strip()[:60], error=err.message,
+        return render_template("event_new.html", **_ctx(entered_id=cloud_settings.redact_if_secret_like(entered.strip()[:60]), error=err.message,
                                                         needs_settings=False)), 400
     except reg.RegistrationError as err:
         reg.log_rejection(db, err, "Register Event", event_id, source)
-        return render_template("event_new.html", **_ctx(entered_id=entered.strip()[:60], error=err.message,
+        return render_template("event_new.html", **_ctx(entered_id=cloud_settings.redact_if_secret_like(entered.strip()[:60]), error=err.message,
                                                         needs_settings=err.message == NOT_CONFIGURED)), 400
 
     if outcome == "already_registered":

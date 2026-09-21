@@ -224,11 +224,12 @@ def parse_event_config(data: bytes) -> EventConfig:
     try:
         parts = urlsplit(storage_url)
         host_ok = bool(parts.hostname) and parts.scheme == "https" and parts.username is None \
-            and parts.password is None
+            and parts.password is None and not parts.query and not parts.fragment
+        parts.port                                          # raises ValueError for a malformed port
     except ValueError:
         host_ok = False
     if not host_ok:
-        raise _invalid("The field 'eventStorageUrl' must be an https address.")
+        raise _invalid("The field 'eventStorageUrl' must be a plain https address (no query or fragment).")
 
     guid = normalise_guid(obj.get("exportGuid"))
     if guid is None:
