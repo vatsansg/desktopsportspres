@@ -161,7 +161,7 @@ Status values: `Not started` / `In progress` / `Awaiting user go-ahead` / `Compl
 | 1 | Complete | 21 Sep 2026 | `47e3461` (merge `47ca4f7`); logo follow-up `8ffc002` |
 | 2 | Complete | 21 Sep 2026 | `29e54c5` + `ac03ded` (merge `8d2c25e`) |
 | 3 | Complete | 21 Sep 2026 | `8cb2c81` + `1369bac` (merge `6405679`) |
-| 4 | Complete | 21 Sep 2026 | `cdc9aa8` + `35bb338` (merge pending) |
+| 4 | Complete | 21 Sep 2026 | `cdc9aa8`, `35bb338`, `f03586e` (merge `2efaafe`) |
 | 5 | Not started | | |
 | 6 | Not started | | |
 | 7 | Not started | | |
