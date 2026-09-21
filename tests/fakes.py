@@ -10,7 +10,7 @@ mapping) is what the tests exercise - not a mock of it.
 import hashlib
 from datetime import datetime, timezone
 
-from azure.core.exceptions import ClientAuthenticationError, HttpResponseError, ResourceNotFoundError
+from azure.core.exceptions import ClientAuthenticationError, HttpResponseError, ResourceModifiedError, ResourceNotFoundError
 
 # Shaped like a real 88-character account key, but obviously fake.
 FAKE_KEY = "FAKEKEY" + "A" * 79 + "=="
@@ -36,6 +36,7 @@ class _BlobItem:
         digest = service.md5_overrides.get(name, None if service.no_md5 else hashlib.md5(data).digest())
         self.content_settings = _Settings(bytearray(digest) if digest else None)
         self.last_modified = service.modified
+        self.etag = f'"{hashlib.md5(data).hexdigest()}"'
 
 
 class _Download:
@@ -50,11 +51,13 @@ class _BlobClient:
     def __init__(self, service, container, blob):
         self._service, self._container, self._blob = service, container, blob
 
-    def download_blob(self, offset=0, length=None):
+    def download_blob(self, offset=0, length=None, etag=None, match_condition=None):
         self._service._check("download")
         if self._container not in self._service.containers or (self._container, self._blob) not in self._service.blobs:
             raise ResourceNotFoundError("BlobNotFound")
         data = self._service.blobs[(self._container, self._blob)]
+        if etag is not None and etag != f'"{hashlib.md5(data).hexdigest()}"':
+            raise ResourceModifiedError("ConditionNotMet")             # the file is no longer the version that was listed
         self._service.downloads.append((self._container, self._blob, offset, length))
         end = None if length is None else offset + length
         return _Download(data[offset:end])

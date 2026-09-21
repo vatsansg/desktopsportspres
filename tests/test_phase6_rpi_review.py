@@ -315,14 +315,17 @@ def test_data_is_flushed_to_disk_before_it_takes_the_real_name(tmp_path, monkeyp
 
 def test_old_temporary_files_from_a_crash_are_swept_but_a_fresh_one_is_kept(tmp_path_factory, cfg):
     tmp_path = tmp_path_factory.mktemp("sweep")
-    old, fresh = tmp_path / ".aaa.ledsync-tmp", tmp_path / ".bbb.ledsync-tmp"
-    old.write_bytes(b"x")
-    fresh.write_bytes(b"x")
+    old, fresh = tmp_path / ("." + "a" * 32 + ".ledsync-tmp"), tmp_path / ("." + "b" * 32 + ".ledsync-tmp")
+    users = tmp_path / "my-own-file.ledsync-tmp"                        # not the exact name this application creates
+    for f in (old, fresh, users):
+        f.write_bytes(b"x")
     (tmp_path / "keep.png").write_bytes(b"x")
     two_hours_ago = time.time() - 7200
     os.utime(old, (two_hours_ago, two_hours_ago))
+    os.utime(users, (two_hours_ago, two_hours_ago))
+    localfiles._swept.clear()
     localfiles.open_root(tmp_path, cfg.data_dir)
-    assert sorted(p.name for p in tmp_path.iterdir()) == [".bbb.ledsync-tmp", "keep.png"]
+    assert sorted(p.name for p in tmp_path.iterdir()) == sorted([fresh.name, "keep.png", users.name])
 
 
 def test_a_read_only_file_gives_a_specific_message_for_write_and_delete(tmp_path):

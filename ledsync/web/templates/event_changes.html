@@ -12,8 +12,7 @@
   {% endfor %}
 
   {% for line in job_summary %}
-  <p class="alert {{ 'alert-success' if loop.first and 'failed 0.' in line else 'alert-error' if loop.first else 'alert-info' }}"
-     role="{{ 'status' if loop.first and 'failed 0.' in line else 'alert' }}">{{ line }}</p>
+  <p class="alert alert-{{ line.level }}" role="{{ 'alert' if line.level == 'error' else 'status' }}">{{ line.text }}</p>
   {% endfor %}
 
   {% if running %}
@@ -22,6 +21,8 @@
     <div id="progress" class="panel" data-url="{{ url_for('changes.progress', event_id=event.event_id) }}" role="status" aria-live="polite">
       <p id="progress-text">Starting…</p>
       <progress id="progress-bar" max="100" value="0" aria-label="Progress of the current file">0%</progress>
+      <noscript><p class="hint">Progress is not shown without JavaScript. <a href="{{ url_for('changes.page', event_id=event.event_id) }}">Reload
+        this page</a> to see whether the download has finished.</p></noscript>
     </div>
     <form method="post" action="{{ url_for('changes.cancel', event_id=event.event_id) }}" novalidate>
       <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">

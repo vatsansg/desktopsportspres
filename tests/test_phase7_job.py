@@ -256,8 +256,7 @@ def test_only_one_job_runs_per_event_and_the_page_shows_progress_and_cancel(ev):
         progress.begin("big.mp4", 1000)
         progress.add_bytes(250)
         gate.wait(10)
-        progress.end("done", "finished")
-        return ["finished"]
+        return [{"level": "success", "text": "finished"}]
     job = registry.start("1000", slow)
     assert job is not None and registry.start("1000", slow) is None                   # a second one is refused
     html = page(ev)
@@ -272,6 +271,7 @@ def test_only_one_job_runs_per_event_and_the_page_shows_progress_and_cancel(ev):
     gate.set()
     job.thread.join(5)
     assert not job.thread.is_alive() and job.progress.state == "done"
+    assert registry.take_summary("1000") == [{"level": "success", "text": "finished"}]
     gate.set()                                                        # a new job can start once the first has ended
     assert registry.start("1000", slow, inline=True) is not None
 
@@ -282,14 +282,14 @@ def test_a_job_that_crashes_ends_in_an_error_state_not_a_stuck_one():
     def boom(progress):
         raise RuntimeError("secret detail")
     job = registry.start("1000", boom, inline=True)
-    assert job.progress.state == "error" and "secret" not in " ".join(job.summary) and not registry.running("1000")
-    assert registry.take_summary("1000") == ["The download stopped because of an unexpected problem."]
+    assert job.progress.state == "error" and "secret" not in str(job.summary) and not registry.running("1000")
+    assert registry.take_summary("1000") == [{"level": "error", "text": "The download stopped because of an unexpected problem."}]
     assert registry.take_summary("1000") == []
 
 
 def test_job_lookup_ignores_event_id_case():
     registry = downloads.JobRegistry()
-    registry.start("Doha-A", lambda p: (p.end("done", "x"), ["x"])[1], inline=True)
+    registry.start("Doha-A", lambda p: [{"level": "info", "text": "x"}], inline=True)
     assert registry.get("doha-a") is not None
 
 

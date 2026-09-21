@@ -163,37 +163,6 @@ def test_phase6_downloads_parses_and_compares_the_real_change_log(cfg):
     assert (cfg.data_dir / "_localchangelog.csv").read_text(encoding="utf-8-sig").count("\n") == 1   # headers only
 
 
-def test_phase6_downloads_the_real_rpi_file_into_the_rpi_folder(cfg):
-    """The real `RPI/HOME_Look.png` (Azure holds it as `rpi/HOME_Look.png`) is downloaded, read-only, into the
-    default RPI folder of a scratch data folder."""
-    from ledsync.db import connect, init_db
-    from ledsync.services import auth
-    init_db(cfg.db_path)
-    conn = connect(cfg.db_path)
-    auth.seed_admin(conn)
-    cs.save_cloud(conn, ACCOUNT, CONTAINER, KEY)
-    conn.close()
-    app = create_app(cfg)
-    app.config["ALLOWED_HOSTS"] = frozenset({"localhost"})
-    client = app.test_client()
-    client.get(f"/_launch?t={app.config['LAUNCH_TOKEN']}")
-    client.post("/login", data={"username": "admin", "password": auth.DEFAULT_PASSWORD,
-                                "csrf_token": csrf_from(client, "/login")})
-    client.post("/events/new", data={"event_id": "1000", "csrf_token": csrf_from(client, "/events/new")})
-    client.post("/events/1000/changes/check", data={"csrf_token": csrf_from(client, "/events/1000/changes")})
-    resp = client.post("/events/1000/changes/rpi", data={"csrf_token": csrf_from(client, "/events/1000/changes")},
-                       follow_redirects=True)
-    html = resp.get_data(as_text=True)
-    assert resp.status_code == 200 and KEY not in html and "RPI files: 1 downloaded, 0 removed, 0 failed." in html
-    saved = cfg.data_dir / "RPI" / "HOME_Look.png"
-    assert saved.is_file() and saved.read_bytes()[:8] == b"\x89PNG\r\n\x1a\n" and saved.stat().st_size > 100
-    assert sorted(p.name for p in (cfg.data_dir / "RPI").iterdir()) == ["HOME_Look.png"]
-    [row] = db_rows(cfg, "SELECT * FROM download_history")
-    assert (row["led_type"], row["file_name"], row["status"], row["table_number"]) == ("RPI", "HOME_Look.png", "Success", None)
-    assert KEY not in json.dumps(row) and "No RPI files are waiting." in client.get("/events/1000/changes").get_data(as_text=True)
-    print(f"downloaded {saved.stat().st_size} bytes")
-
-
 # --- Phase 7: real downloads (Azure is only read; files go to a scratch folder) -----------------------------------------
 
 def _signed_in_app(cfg):

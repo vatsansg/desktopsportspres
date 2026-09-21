@@ -60,7 +60,9 @@ Live checks (read-only, re-runnable): `.\.venv\Scripts\python -m pytest -q --liv
 
 | Total cases | Passed | Failed | Blocked | Not yet run |
 |---|---|---|---|---|
-| *(filled in after the review)* | | | | 15 (manual TC-M01 – TC-M15, for the owner) |
+| 35 | 20 (8 automated groups covering about 130 new pytest cases, 4 live checks against real Azure, 1 rendered-page group — all run by Claude) | 0 | 0 | 15 (manual TC-M01 – TC-M15, for the owner) |
+
+`.\.venv\Scripts\python -m pytest -q` → **1314 passed, 12 skipped** (the skipped are the live-Azure tests, which need `--live`); `--live` → **all live tests pass** against real Azure (read-only); the full 630 MB run needs `$env:LEDSYNC_LIVE_FULL = "1"`.
 
 ## Live validation against the real Azure account (read-only, 21/09/26)
 
@@ -69,11 +71,20 @@ Live checks (read-only, re-runnable): `.\.venv\Scripts\python -m pytest -q --liv
 | TC-L01 | The real event's listings carry size and MD5 | Pass — 82 files, 630 MB; MD5 on 80 of 82 (the two without are small `sponsorsequence.csv` files, checked by size) |
 | TC-L02 | The check finds the real files the change log never mentions | Pass — Table 2 Inner assets offered as "New (not in log)" |
 | TC-L03 | A real selection (Table 1 Main LED, the RPI file, Table 2 files) downloaded through the real engine and re-checked against Azure's size and MD5 | Pass — 5 of 5 verified; **`default.png` exists in Table 1 Main LED (946 KB) and Table 2 Inner (132 KB) and both were stored correctly** |
-| TC-L04 | **The whole real event through the page** (Check, then DOWNLOAD FILES) | Pass — **76 files (75 Table/LED + 1 RPI), 0 failed, in 87 s**; every file's size and MD5 equals Azure's; folders exactly `Table 1\{Inner, Outer, Main LED}` and `Table 2\Inner`; RPI in `RPI\1000\`; a second run downloads 0 files |
+| TC-L04 | **The whole real event through the page** (Check, then DOWNLOAD FILES) | Pass — **76 files (75 Table/LED + 1 RPI), 0 failed, in about 100 s** (run twice — before and after the review fixes); every file's size and MD5 equals Azure's; folders exactly `Table 1\{Inner, Outer, Main LED}` and `Table 2\Inner`; RPI in `RPI\1000\`; a second run downloads 0 files |
 
 ## Test cases — automated
 
-*(Filled in below after the independent review.)*
+| ID | Description | Status |
+|---|---|---|
+| TC-A01 | **Azure listings and ranged reads:** size, MD5, last-modified and version listed; folders and files found in any A–Z letter case, only files listed, missing folder = no files, two folders differing only in case refused, unsafe paths refused before any call, listings shared across lookups, files read in 4 MB ranges never whole, empty file needs no read, missing file / lost connection are plain errors | Pass |
+| TC-A02 | **Verified streaming writes:** size and MD5 checked before the file takes its name; wrong size or checksum discarded and the old copy kept; no fingerprint = size only; empty file; cancel between chunks and errors while downloading leave nothing behind; disk-space check; unsafe names, folders with the file's name refused | Pass |
+| TC-A03 | **Sub-folders and settings:** nested folders created only from validated names, 10 unsafe names refused, a file or **junction** with a folder name refused; the asset folder default (`Events`) and both folders saved together, reset by blanking; the two folders must differ and not nest (also through junction and 8.3 aliases); unsafe folders and a folder containing the data folder refused; audit rows | Pass |
+| TC-A04 | **Azure-list comparison:** files only in Azure offered as "New (not in log)" with their **real** Azure path (including `Main LED`); the log always wins; placeholders, unsafe names and non-assets left out (unsafe ones **counted and shown**); only enabled tables/LED folders listed; both `Main LED` spellings; already-downloaded files not re-offered; names that would be one file on disk, and the same name in two folders, reported not merged; a listing problem is reported and the log result stands; 3,000 unlogged files in seconds | Pass |
+| TC-A05 | **Download engine:** all and only the new files land in `<event>\Table N\<LED>`; only the event's tables/LED types get folders; the same file name in four folders stays four files; history, source address (no key), local path, time recorded; second run does nothing; an update replaces only that file; a cloud removal deletes only that file (never through a junction); deleted-by-hand files come back; gone-everywhere files are dropped once; a bad file never stops the rest and is retried; a corrupt download is retried once, reported, old copy kept; a transient failure is survived; a 9 MB file needs 3 ranged reads; no fingerprint accepted on size; a file replaced during the download is detected and the retry gets the new version (also without MD5); connection problems and Azure 429/500/503 stop the run after one retry; cancel stops between files; progress reports files and bytes; dangerous roots refused; two events keep separate folders; only reads Azure | Pass |
+| TC-A06 | **Job, routes and page:** check-then-download through the page puts every file in place; summary shown once (and never lost); history and `_localchangelog.csv` cover every kind of file; chosen folders used; removals reported; single-file problems listed while the rest arrive; an unusable folder is a plain message; a re-exported event downloads nothing; login/launch-cookie/CSRF on every new route; a GET never starts a download; a real worker thread runs to completion and can be polled; one job per event; the progress panel with Cancel; crashes end in an error state; both folders on the Settings page | Pass |
+| TC-A07 | **Independent-review regression tests (34):** Azure-only `Main LED` download; junction removal refused; temp files swept in sub-folders (user files untouched); the summary race; gone-everywhere files; retry sees fresh listing; replaced-during-download; 429/500/503; stop/cancel accounting and no slow tidy-up; error styling; no-JS fallback and accessible progress; settings identity checks; over-long paths; FIPS-mode checksum; bounded page disk checks; error mapping | Pass |
+| TC-A08 | Earlier phases unchanged (the Phase 6 RPI tests were updated for per-event folders; the Azure read-only AST guards, key isolation and CSP all pass with the new code) | Pass |
 
 ## Rendered-page checks
 
@@ -83,11 +94,24 @@ Live checks (read-only, re-runnable): `.\.venv\Scripts\python -m pytest -q --liv
 
 ## Open defects / follow-ups
 
-*(Filled in below after the independent review.)*
+| ID | Description | Severity | Status |
+|---|---|---|---|
+| F-48 | 24 assets in Azure `Table 2/inner/` had no change-log entry. | High | **Closed** — Azure's file list is compared; the web team can still fix the log |
+| F-49 | Flat RPI folder shared by all events. | Medium | **Closed** — owner decision: `<RPI folder>\<Event ID>\` |
+| F-50 | Large files were held in memory. | Medium | **Closed** — 4 MB ranged streaming |
+| F-46 | Re-validate every name at the write site; never trust the parser alone. | Medium | **Closed** — `localfiles` re-checks names, folders, links and lengths |
+| F-38 | Cloud deletions carried out safely. | Medium | **Closed** — inside the event's folder only, never through a link |
+| F-42 | Locate blobs by case-insensitive name. | Medium | **Closed** — done by listing (any A–Z case; ambiguous refused) |
+| F-51 | An Azure-only file **overwritten in Azure without a change-log entry** is not re-downloaded (its history holds Azure's last-modified time from the first download). The change log is the way to signal an update; ask the web team to log every change. | Low | Accepted — design |
+| F-52 | Streaming writes have **no overall time limit**: a dead network destination could hold the download inside a write (folder operations and the final move are time-limited; cancel is honoured between chunks). Also unverified against real Azure: blobs with `Content-Encoding`. | Low | Accepted |
+| F-53 | The download summary is shown **once** — the first page view consumes it (like a flash message); a second browser tab sees nothing. The history, `_localchangelog.csv` and logs keep the record. | Info | Accepted |
+| F-54 | Real network-share aliases (`\\localhost\C$`, a mapped drive) of the data folder are covered by file-identity checks and by a simulated alias plus a real `subst` drive; a real SMB alias was not exercised on this machine. | Low | Accepted |
+| F-55 | **Nothing is pushed to the LED devices** — that is Phase 8 (needs the shared folders you mapped in Phase 5). | — | Next phase |
+| F-12 | Earlier carry-forwards (single-instance lock, log retention, migration runner) unchanged. | — | Carried forward |
 
 ## Sign-off
 
 | Role | Name | Date | Outcome |
 |---|---|---|---|
-| Independent Solution Architect review | Independent review agent (fresh context) | 21/09/26 | *pending* |
+| Independent Solution Architect review | Independent review agent (fresh context) | 21/09/26 | **Approved with notes** — no blockers. Five "fix now" findings reproduced and fixed: Azure-only files in a `Main LED` folder were offered but could never be downloaded; a cloud removal followed a **junction** at Table/LED level and deleted a file outside the asset tree; stale temporary files in sub-folders were never swept; a finished job's **summary could be lost** in a race; a file missing from disk and from Azure kept the run "waiting" forever. Worthwhile notes also done: the retry re-lists (no stale cache), a **file replaced in Azure during a download is detected** (version pinning), Azure 429/5xx stop the run, a stop/cancel skips the slow tidy-up and counts every file not tried, folder settings compared by real location, over-long paths and FIPS-mode checksums handled, accessibility of the progress panel, structured message severity. 34 new tests; **not re-reviewed**. |
 | User (Vatsan) go-ahead | Vatsan | | *pending manual test* |

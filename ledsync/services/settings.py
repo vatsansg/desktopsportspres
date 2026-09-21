@@ -299,12 +299,15 @@ def load_asset_folder(conn: sqlite3.Connection, data_dir) -> RpiFolder:
 
 
 def _norm(path) -> str:
+    """A comparable spelling of a folder: a local path's real location (8.3 names and junctions resolved) in one case."""
     import os
-    return os.path.normcase(os.path.normpath(str(path))).rstrip("\\") + "\\"
+    return os.path.normcase(os.path.normpath(mappings.resolve_local(str(path)))).rstrip("\\") + "\\"
 
 
-def _check_apart(rpi: Path, assets: Path) -> None:
-    a, b = _norm(rpi), _norm(assets)
+def _check_apart(rpi: Path, assets: Path, data_dir) -> None:
+    a, b, data = _norm(rpi), _norm(assets), _norm(data_dir)
+    if data.startswith(a) or data.startswith(b):
+        raise SettingsError("A download folder cannot contain the application's own data folder.")
     if a.startswith(b) or b.startswith(a):
         raise SettingsError("The RPI folder and the asset folder must be two different folders, and neither can be inside "
                             "the other.")
@@ -315,7 +318,7 @@ def save_folders(conn: sqlite3.Connection, rpi_text: str, asset_text: str, data_
     rpi_value = validate_rpi_folder(rpi_text, data_dir)
     asset_value = _validate_asset_folder(asset_text, data_dir)
     _check_apart(Path(rpi_value) if rpi_value else default_rpi_folder(data_dir),
-                 Path(asset_value) if asset_value else default_asset_folder(data_dir))
+                 Path(asset_value) if asset_value else default_asset_folder(data_dir), data_dir)
     changed = []
     try:
         if _get(conn, KEY_RPI_FOLDER) != rpi_value:

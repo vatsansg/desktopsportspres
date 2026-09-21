@@ -19,9 +19,10 @@ from dataclasses import dataclass
 from datetime import timezone
 from urllib.parse import quote
 
+from azure.core import MatchConditions
 from azure.core.exceptions import (
-    ClientAuthenticationError, DecodeError, HttpResponseError, ResourceNotFoundError, ServiceRequestError,
-    ServiceResponseError,
+    ClientAuthenticationError, DecodeError, HttpResponseError, ResourceModifiedError, ResourceNotFoundError,
+    ServiceRequestError, ServiceResponseError,
 )
 from azure.storage.blob import BlobServiceClient, ExponentialRetry
 
@@ -77,6 +78,7 @@ class BlobInfo:
     size: int | None
     md5: bytes | None          # Azure's own MD5 of the content, when it has one
     modified: str              # last-modified time, ISO UTC ('' if unknown)
+    etag: str = ""             # the version listed; a download is pinned to it so a replaced file is never mixed
 
 
 @dataclass(frozen=True)
@@ -109,6 +111,9 @@ def map_error(exc: Exception, doing: str) -> StorageError:
         return StorageError(
             exceptions.STORAGE_CONNECTIVITY,
             "Could not reach Azure Storage. Check the internet connection and the storage account name, then try again.")
+    if isinstance(exc, HttpResponseError) and (getattr(exc, "status_code", 0) or 0) in (429, 500, 502, 503, 504):
+        return StorageError(exceptions.STORAGE_CONNECTIVITY,
+                            "Azure Storage is busy or unavailable right now. Wait a moment and try again.")
     if isinstance(exc, HttpResponseError):
         return StorageError(exceptions.DOWNLOAD,
                             f"Azure Storage returned an error (status {getattr(exc, 'status_code', '?')}) while {doing}.")
@@ -248,7 +253,7 @@ class AzureReadOnlyStorage:
         except Exception as exc:                                       # noqa: BLE001
             raise map_error(exc, f"looking for {relative_path}") from None
         full, entry = frontier[0]
-        return BlobInfo(full[len(location.folder) + 1:], entry[2], entry[3], entry[4])
+        return BlobInfo(full[len(location.folder) + 1:], entry[2], entry[3], entry[4], entry[5])
 
     def list_files(self, location: EventLocation, folder_path: str, cache: dict | None = None) -> list[BlobInfo]:
         """The files directly inside a folder of the event (e.g. `Table 1/Inner`), the folder being matched in any
@@ -268,7 +273,7 @@ class AzureReadOnlyStorage:
                 raise StorageError(exceptions.CONFIGURATION,
                                    f"More than one folder in the event folder matches {folder_path} apart from letter "
                                    "case, so it was not used. Ask the web application administrator to rename one.")
-            return [BlobInfo(frontier[0][len(location.folder) + 1:] + entry[0], entry[2], entry[3], entry[4])
+            return [BlobInfo(frontier[0][len(location.folder) + 1:] + entry[0], entry[2], entry[3], entry[4], entry[5])
                     for entry in self._listing(location.container, frontier[0], cache) if entry[1]]
         except StorageError:
             raise
@@ -276,7 +281,7 @@ class AzureReadOnlyStorage:
             raise map_error(exc, f"listing {folder_path}") from None
 
     def _listing(self, container: str, prefix: str, cache: dict) -> list:
-        """(name, is_file, size, md5, modified) for everything directly inside `prefix`, listed once per cache.
+        """(name, is_file, size, md5, modified, etag) for everything directly inside `prefix`, listed once per cache.
         NOTE: `is_file` is the second field; folders have is_file False."""
         key = (container, prefix)
         if key not in cache:
@@ -291,7 +296,7 @@ class AzureReadOnlyStorage:
                 if not leaf or "/" in leaf:
                     continue
                 size = md5 = None
-                modified = ""
+                modified = etag = ""
                 if not folder:
                     try:
                         size = int(item.size)
@@ -306,19 +311,27 @@ class AzureReadOnlyStorage:
                         modified = item.last_modified.astimezone(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
                     except (AttributeError, TypeError, ValueError):
                         modified = ""
-                entries.append((leaf, not folder, size, md5, modified))
+                    try:
+                        etag = str(item.etag or "")
+                    except AttributeError:
+                        etag = ""
+                entries.append((leaf, not folder, size, md5, modified, etag))
             cache[key] = entries
         return cache[key]
 
-    def iter_blob(self, location: EventLocation, relative_path: str, size: int, chunk_size: int = 4 * 1024 * 1024):
+    def iter_blob(self, location: EventLocation, relative_path: str, size: int, chunk_size: int = 4 * 1024 * 1024,
+                  etag: str = ""):
         """Yield a file's bytes in ranges of `chunk_size` (so a large video never sits in memory whole). `relative_path`
-        must be the REAL path from `find_blob`, `size` the listed size. Raises StorageError."""
+        must be the REAL path from `find_blob`, `size` the listed size. With `etag`, every range is requested only if the
+        file is still that version, so a file replaced meanwhile can never be assembled from two versions.
+        Raises StorageError."""
         blob = location.blob_path(relative_path)
         offset = 0
         try:
             client = self._service.get_blob_client(container=location.container, blob=blob)
             while offset < size:
-                data = bytes(client.download_blob(offset=offset, length=min(chunk_size, size - offset)).readall())
+                pin = {"etag": etag, "match_condition": MatchConditions.IfNotModified} if etag else {}
+                data = bytes(client.download_blob(offset=offset, length=min(chunk_size, size - offset), **pin).readall())
                 if not data:
                     raise StorageError(exceptions.DOWNLOAD, "Azure ended the download early.")
                 offset += len(data)
@@ -327,6 +340,9 @@ class AzureReadOnlyStorage:
             raise
         except ResourceNotFoundError:
             raise StorageError(exceptions.MISSING_FOLDER, f"The file {relative_path} was not found in the event folder.") from None
+        except ResourceModifiedError:
+            raise StorageError(exceptions.DOWNLOAD, f"The file {relative_path} changed in Azure while it was being "
+                                                    "downloaded.") from None
         except Exception as exc:                                       # noqa: BLE001
             raise map_error(exc, f"downloading {relative_path}") from None
 

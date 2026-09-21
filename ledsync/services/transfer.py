@@ -35,6 +35,7 @@ class TransferResult:
     downloaded: int = 0
     removed: int = 0
     failed: int = 0
+    gone: int = 0                    # downloaded before, missing from disk, and no longer in Azure: dropped from the list
     remaining: int = 0               # files not attempted (run limit, cancelled, or the run was stopped)
     stopped: bool = False
     cancelled: bool = False
@@ -42,12 +43,13 @@ class TransferResult:
 
     @property
     def total(self) -> int:
-        return self.downloaded + self.removed + self.failed + self.remaining
+        return self.downloaded + self.removed + self.failed + self.gone + self.remaining
 
     def add(self, other: "TransferResult") -> None:
         self.downloaded += other.downloaded
         self.removed += other.removed
         self.failed += other.failed
+        self.gone += other.gone
         self.remaining += other.remaining
         self.stopped = self.stopped or other.stopped
         self.cancelled = self.cancelled or other.cancelled
@@ -69,7 +71,8 @@ def _retry(action):
     try:
         return action()
     except (StorageError, localfiles.IntegrityError) as err:
-        if isinstance(err, StorageError) and err.category not in STOP_CATEGORIES:
+        changed = isinstance(err, StorageError) and err.category == exceptions.DOWNLOAD and "changed in Azure" in err.message
+        if isinstance(err, StorageError) and err.category not in STOP_CATEGORIES and not changed:
             raise
         time.sleep(RETRY_DELAY)
         return action()
@@ -93,14 +96,19 @@ def run(conn: sqlite3.Connection, storage, account: str, location, event_id: str
         ok = False
         try:
             if item.action == "Download":
+                tries = []
+
                 def attempt():
+                    if tries:
+                        listings.clear()                                  # a retry must see Azure as it is NOW, not the cached list
+                    tries.append(1)
                     info = storage.find_blob(location, item.path, listings)
                     if info.size is None:
                         raise StorageError(exceptions.DOWNLOAD, "Azure did not report the size of this file.")
                     progress.begin(item.file_name, info.size)                 # a retry starts the bar again
                     destination = folder_for(item)
                     written = localfiles.write_stream(
-                        destination, item.file_name, storage.iter_blob(location, info.path, info.size),
+                        destination, item.file_name, storage.iter_blob(location, info.path, info.size, etag=info.etag),
                         size=info.size, md5=info.md5, on_bytes=progress.add_bytes, cancelled=lambda: progress.cancelled)
                     return info, written
 
@@ -125,6 +133,18 @@ def run(conn: sqlite3.Connection, storage, account: str, location, event_id: str
             break
         except (StorageError, localfiles.LocalFileError) as err:
             conn.rollback()
+            if item.repair and isinstance(err, StorageError) and err.category == exceptions.MISSING_FOLDER:
+                # It was downloaded once, is gone from disk AND from Azure, and the log never removed it: record that
+                # it no longer exists, so it stops being offered (a Failure row would come back every run).
+                try:
+                    history(conn, event_id, item, table, led, location.blob_url(account, item.path), "", "Deleted")
+                    oplog.add(conn, operation, "Success", f"{item.file_name} is no longer in Azure and is no longer listed.", event_id)
+                    conn.commit()
+                    result.gone += 1
+                    progress.finish_file(True)
+                    continue
+                except sqlite3.Error:
+                    conn.rollback()
             _fail(conn, result, event_id, item, table, led, err, operation)
             if isinstance(err, StorageError) and err.category in STOP_CATEGORIES:
                 result.stopped = True

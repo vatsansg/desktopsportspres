@@ -17,6 +17,7 @@ class Progress:
         self.bytes_total = 0                   # size of the current file
         self.bytes_done = 0
         self.message = ""                      # a short plain summary once finished
+        self.final_state = "done"              # what `state` becomes when the job ends: done | cancelled | error
 
     # --- worker side -------------------------------------------------------------------------------
     def start(self, total: int) -> None:

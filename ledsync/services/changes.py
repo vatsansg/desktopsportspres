@@ -111,6 +111,7 @@ class Assessment:
     revisions: int                    # how many log entries there are for this path
     local_status: str = ""            # the latest local record for this path: Success | Deleted | "" (none)
     in_log: bool = True               # False: the file is in Azure but the change log does not mention it
+    repair: bool = False              # True: the history says it was downloaded but it is no longer on disk
 
 
 @dataclass(frozen=True)
@@ -164,8 +165,11 @@ def local_state(conn: sqlite3.Connection, event_id: str) -> dict[str, LocalRecor
 def _classify_path(path: str, enabled: set) -> tuple[int | None, str, str] | str:
     """(table or None, LED type or "RPI", file name) for a usable path, or the reason it is not applicable."""
     where = _classify_folder(path, enabled)
-    if isinstance(where, tuple) and not has_extension(where[2]):
-        return "The file has no extension, so it is not an asset."
+    if isinstance(where, tuple):
+        if not has_extension(where[2]):
+            return "The file has no extension, so it is not an asset."
+        if where[2].casefold() in NOT_ASSETS:
+            return "This is a placeholder file, not an asset."
     return where
 
 
@@ -241,40 +245,59 @@ def _sort_key(a: Assessment):
 def add_azure_files(comparison: Comparison, storage, location, event_structure: structure.EventStructure,
                     local: dict[str, LocalRecord]) -> Comparison:
     """Also compare Azure's own file list: files in an enabled Table / LED folder that the change log never mentions
-    are offered for download (unless already stored). Read-only listing; a problem is reported, never fatal."""
+    are offered for download (unless already stored). Read-only listing; a problem is reported, never fatal.
+
+    The offered path is the file's REAL Azure path (e.g. `Table 1/Main LED/a.png`), so the download finds it. Names
+    that would be one file on this computer - the same name in two Azure folders (`mainled` and `Main LED`), or names
+    that differ only in letter case or accents - are NOT offered and are reported, never silently merged."""
     logged = {path_key(a.table, a.led_type, a.file_name) for a in comparison.assessments if a.table is not None}
     logged_loose = {_loose(k) for k in logged}
     logged_paths = {fold(a.path) for a in comparison.assessments}
     extras: list[Assessment] = []
-    seen: set[str] = set()
     notes: list[str] = []
     listings: dict = {}
+    unsafe = clashes = 0
     epoch = datetime(1970, 1, 1, tzinfo=timezone.utc)
+    now_text = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
     for table, led in event_structure.enabled_pairs:
-        found: dict = {}
+        found: dict[str, list] = {}
         try:
             for folder in LED_FOLDER_NAMES[led]:
                 for info in storage.list_files(location, f"Table {table}/{folder}", listings):
-                    found[info.path.rsplit("/", 1)[-1]] = info
+                    found.setdefault(info.path.rsplit("/", 1)[-1], []).append(info)
         except StorageError as err:
             notes.append(err.message)
             continue
-        for name, info in found.items():
-            if (_path_problem(name) or blocked_name_problem(name) or not has_extension(name)
-                    or name.casefold() in NOT_ASSETS):
+        by_key: dict[str, list] = {}                                  # what a local file would be called -> Azure files
+        for name, infos in found.items():
+            if _path_problem(name) or blocked_name_problem(name):
+                unsafe += 1
                 continue
-            key = path_key(table, led, name)
-            if key in logged or key in seen or fold(f"Table {table}/{led}/{name}") in logged_paths:
+            if not has_extension(name) or name.casefold() in NOT_ASSETS:
+                continue                                              # placeholders and non-assets: silently ignored
+            by_key.setdefault(path_key(table, led, name), []).extend(infos)
+        by_loose: dict[str, int] = {}
+        for key in by_key:
+            by_loose[_loose(key)] = by_loose.get(_loose(key), 0) + 1
+        for key, infos in by_key.items():
+            if len(infos) > 1 or by_loose[_loose(key)] > 1:
+                clashes += 1
                 continue
-            if _loose(key) in logged_loose or any(_loose(key) == _loose(s) for s in seen):
-                continue                                              # would be the same file on disk as another entry
-            seen.add(key)
+            info = infos[0]
+            name = info.path.rsplit("/", 1)[-1]
+            if key in logged or _loose(key) in logged_loose or fold(f"Table {table}/{led}/{name}") in logged_paths:
+                continue                                              # the change log mentions it: the log decides
             have = local.get(key)
-            when = parse_timestamp(info.modified) or epoch
+            stamp = info.modified or now_text                         # a valid time for the history even if Azure gave none
             action, label, reason = ((DOWNLOAD, LABEL_NEW_UNLOGGED, "In Azure but not in the change log.") if have is None
                                      else (DONE, DONE, "Already downloaded."))
-            extras.append(Assessment(f"Table {table}/{led}/{name}", table, led, name, "New", info.modified,
-                                     when, action, label, reason, 0, have.status if have else "", False))
+            extras.append(Assessment(info.path, table, led, name, "New", stamp, parse_timestamp(stamp) or epoch,
+                                     action, label, reason, 0, have.status if have else "", False))
+    if unsafe:
+        notes.append(f"{unsafe} file(s) in Azure were ignored because their names are not safe to store on this computer.")
+    if clashes:
+        notes.append(f"{clashes} file name(s) in Azure clash (the same name in two folders, or names that differ only in "
+                     "letter case or accents) and were not offered.")
     note = " ".join(dict.fromkeys(notes))
     if not extras and not note:
         return comparison

@@ -53,7 +53,7 @@ def _waiting(report: changes.Report, event_id: str, data_dir):
     asset_folder = cloud_settings.load_asset_folder(db, data_dir)
     try:
         n_rpi = len(rpi.rpi_items(report.comparison, rpi.event_folder(rpi_folder.effective, event_id)))
-        n_assets = len(assets.asset_items(report.comparison, assets.event_folder(asset_folder.effective, event_id)))
+        n_assets = len(assets.asset_items(report.comparison, assets.event_folder(asset_folder.effective, event_id), budget=8.0))
     except localfiles.LocalFileError:
         n_rpi = len(rpi.rpi_items(report.comparison))
         n_assets = len(assets.asset_items(report.comparison))

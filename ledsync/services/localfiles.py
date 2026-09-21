@@ -19,6 +19,7 @@ Removal deletes only a plain file with such a name in that folder.
 
 import hashlib
 import os
+import re
 import shutil
 import stat
 import threading
@@ -32,6 +33,10 @@ from .changelog import _path_problem, blocked_name_problem
 REPARSE_POINT = 0x400        # FILE_ATTRIBUTE_REPARSE_POINT: junctions and symbolic links
 TEMP_SUFFIX = ".ledsync-tmp"
 STALE_TEMP_SECONDS = 3600
+_TEMP_NAME = re.compile(r"^\.[0-9a-f]{32}" + re.escape(TEMP_SUFFIX) + "$")       # exactly what this application creates
+_swept: dict = {}                                                                # folder -> when it was last swept
+MAX_FOLDER_PATH = 200                                                            # leaves room for a file name (Windows: 260)
+MAX_FILE_PATH = 250
 FOLDER_TIMEOUT = 10.0
 FILE_TIMEOUT = 60.0
 _OS_ROOT_VARIABLES = ("SystemRoot", "ProgramFiles", "ProgramFiles(x86)", "ProgramW6432", "ProgramData")
@@ -125,12 +130,17 @@ def open_root(root, data_dir) -> Path:
     return run_limited(lambda: _open_root(Path(root), data_dir), FOLDER_TIMEOUT)
 
 
-def _sweep_stale_temporaries(root: Path) -> None:
-    """Remove temporary files left by an earlier crash (never one that is still being written)."""
-    cutoff = time.time() - STALE_TEMP_SECONDS
+def _sweep_stale_temporaries(folder: Path) -> None:
+    """Remove temporary files this application left in `folder` after a crash or a closed window (never a fresh one, and
+    only names of exactly the form it creates - a user's own file is never touched). At most once per 10 minutes."""
+    key, now = os.path.normcase(str(folder)), time.time()
+    if now - _swept.get(key, 0) < 600:
+        return
+    _swept[key] = now
+    cutoff = now - STALE_TEMP_SECONDS
     try:
-        for entry in os.scandir(root):
-            if entry.name.endswith(TEMP_SUFFIX) and entry.is_file(follow_symlinks=False) and entry.stat().st_mtime < cutoff:
+        for entry in os.scandir(folder):
+            if _TEMP_NAME.match(entry.name) and entry.is_file(follow_symlinks=False) and entry.stat().st_mtime < cutoff:
                 _quiet_remove(Path(entry.path))
     except OSError:
         pass
@@ -149,6 +159,8 @@ def existing_names(root, names) -> set | None:
 def _target(root: Path, name: str) -> Path:
     if _path_problem(name) or blocked_name_problem(name) or "/" in name or name in (".", ".."):
         raise LocalFileError("The file name cannot be used as a file on this computer.")
+    if len(str(root / name)) > MAX_FILE_PATH:
+        raise LocalFileError("The path to this file would be too long for Windows. Choose a shorter asset or RPI folder in Settings.")
     return root / name
 
 
@@ -225,6 +237,8 @@ def subfolder_path(root, *names) -> Path:
         if _folder_name_problem(name):
             raise LocalFileError("A folder name cannot be used on this computer.")
         path = path / name
+    if len(str(path)) > MAX_FOLDER_PATH:
+        raise LocalFileError("The folder path would be too long for Windows. Choose a shorter asset or RPI folder in Settings.")
     return path
 
 
@@ -233,6 +247,23 @@ def open_subfolder(root, *names) -> Path:
     junction with that name is refused, so nothing can be redirected somewhere else."""
     subfolder_path(root, *names)                                   # validates every name before anything is created
     return run_limited(lambda: _make_folders(Path(root), names), FOLDER_TIMEOUT)
+
+
+def existing_subfolder(root, *names) -> Path | None:
+    """`root\\names...` only if it already exists as plain folders all the way down (None if it does not). A link or
+    junction at any level is refused, exactly as when creating - so a removal can never be steered elsewhere."""
+    path = subfolder_path(root, *names)
+
+    def walk():
+        here = Path(root)
+        for name in names:
+            here = here / name
+            if not os.path.lexists(here):
+                return None
+            if _is_link(here) or not here.is_dir():
+                raise LocalFileError("A file or link has the name of a folder this application needs, so it was not used.")
+        return path
+    return run_limited(walk, FOLDER_TIMEOUT)
 
 
 def _make_folders(root: Path, names) -> Path:
@@ -249,6 +280,7 @@ def _make_folders(root: Path, names) -> Path:
             raise
         except OSError:
             raise LocalFileError("A folder could not be created. Check the folder and free disk space.") from None
+    _sweep_stale_temporaries(path)
     return path
 
 
@@ -264,8 +296,8 @@ def write_stream(root, name: str, chunks, *, size: int | None, md5: bytes | None
     target = _target(root, name)
     if size is not None:
         try:
-            free = shutil.disk_usage(root).free
-        except OSError:
+            free = run_limited(lambda: shutil.disk_usage(root).free, 10.0)
+        except (OSError, LocalFileError):
             free = None
         if free is not None and free < size + 64 * 1024 * 1024:
             raise LocalFileError("There is not enough free disk space for this file.")
@@ -273,7 +305,7 @@ def write_stream(root, name: str, chunks, *, size: int | None, md5: bytes | None
     try:
         if os.path.lexists(target) and (target.is_dir() or _is_link(target)):
             raise LocalFileError("A folder or link already has that name, so the file was not written.")
-        digest, count = hashlib.md5(), 0
+        digest, count = hashlib.md5(usedforsecurity=False), 0
         with open(temp, "xb") as handle:
             for chunk in chunks:
                 if cancelled is not None and cancelled():
@@ -289,7 +321,7 @@ def write_stream(root, name: str, chunks, *, size: int | None, md5: bytes | None
             raise IntegrityError("The downloaded file was not the size Azure lists, so it was discarded.")
         if md5 and digest.digest() != md5:
             raise IntegrityError("The downloaded file did not match Azure's checksum, so it was discarded.")
-        os.replace(temp, target)
+        run_limited(lambda: os.replace(temp, target), 30.0)
         landed = os.path.normcase(str(Path(os.path.realpath(target)).parent))
         if landed != os.path.normcase(os.path.realpath(root)):
             raise LocalFileError("The file did not land in its folder, so it cannot be trusted.")
@@ -308,12 +340,12 @@ def write_stream(root, name: str, chunks, *, size: int | None, md5: bytes | None
     return target
 
 
-def missing_files(folder: Path, names) -> set | None:
+def missing_files(folder: Path, names, timeout: float = 5.0) -> set | None:
     """Which of `names` are NOT files in `folder` (None if the folder does not answer in time). A folder that does
     not exist is missing them all."""
     def look():
         return {n for n in names if not os.path.lexists(folder / n)}
     try:
-        return run_limited(look, 5.0)
+        return run_limited(look, timeout)
     except LocalFileError:
         return None

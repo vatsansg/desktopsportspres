@@ -303,7 +303,7 @@ def test_files_in_azure_that_the_log_never_mentions_are_offered(conn, fake):
     blob(fake, "Table 2/inner/b.mp4")
     result = compare_with_azure(conn, fake, [("Table 1/Inner/x.png", T0, "New")])
     extras = [a for a in result.assessments if not a.in_log]
-    assert sorted(a.path for a in extras) == ["Table 2/Inner/a.png", "Table 2/Inner/b.mp4"]
+    assert sorted(a.path for a in extras) == ["Table 2/inner/a.png", "Table 2/inner/b.mp4"]      # the REAL Azure paths
     assert all(a.action == changes.DOWNLOAD and a.label == changes.LABEL_NEW_UNLOGGED and a.table == 2 and a.led_type == "Inner"
                for a in extras)
     assert extras[0].cloud_time_text == "2026-09-20T12:00:00Z"
@@ -330,7 +330,7 @@ def test_only_enabled_tables_and_led_folders_are_listed(conn, fake):
     blob(fake, "Table 3/inner/y.png")
     blob(fake, "Table 1/mainled/z.png")
     result = compare_with_azure(conn, fake, [])
-    assert [a.path for a in result.assessments] == ["Table 1/MainLED/z.png"]
+    assert [a.path for a in result.assessments] == ["Table 1/mainled/z.png"]
     assert not any(a.path.endswith(("x.png", "y.png")) for a in result.assessments)
 
 

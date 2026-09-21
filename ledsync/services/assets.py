@@ -10,6 +10,7 @@ longer on disk. The download itself is the shared loop in `transfer.py` (streame
 """
 
 import dataclasses
+import time
 from pathlib import Path
 
 from . import changes, localfiles, structure, transfer
@@ -29,8 +30,10 @@ def destination(event_dir, item: changes.Assessment) -> Path:
     return localfiles.subfolder_path(event_dir, f"Table {item.table}", structure.LED_LABELS[item.led_type])
 
 
-def asset_items(comparison: changes.Comparison, event_dir=None) -> list[changes.Assessment]:
-    """What an asset run would do; with `event_dir`, files missing from disk that the history says were downloaded too."""
+def asset_items(comparison: changes.Comparison, event_dir=None, budget: float | None = None) -> list[changes.Assessment]:
+    """What an asset run would do; with `event_dir`, files missing from disk that the history says were downloaded too.
+    `budget` (seconds) bounds the disk checks in total, for a page that must not wait on a slow network folder."""
+    deadline = None if budget is None else time.monotonic() + budget
     items = [a for a in comparison.assessments if a.table is not None and a.action in (changes.DOWNLOAD, changes.DELETE)]
     if event_dir is not None:
         by_folder: dict = {}
@@ -39,10 +42,13 @@ def asset_items(comparison: changes.Comparison, event_dir=None) -> list[changes.
                     and a.cloud_status in ("New", "Updated")):
                 by_folder.setdefault(destination(event_dir, a), []).append(a)
         for folder, group in by_folder.items():
-            missing = localfiles.missing_files(folder, [a.file_name for a in group])
+            left = 5.0 if deadline is None else deadline - time.monotonic()
+            if left <= 0:
+                break                                                     # out of time: show what is certain
+            missing = localfiles.missing_files(folder, [a.file_name for a in group], min(5.0, max(left, 0.5)))
             if missing is not None:
                 items += [dataclasses.replace(a, action=changes.DOWNLOAD, label=changes.LABEL_NEW,
-                                              reason="The file is not in the local folder.")
+                                              reason="The file is not in the local folder.", repair=True)
                           for a in group if a.file_name in missing]
     return items
 
@@ -62,8 +68,7 @@ def process(conn, storage, account: str, location: EventLocation, event_id: str,
         return transfer.TransferResult()
 
     def existing(item):
-        folder = destination(event_dir, item)
-        return folder if folder.is_dir() else None
+        return localfiles.existing_subfolder(event_dir, f"Table {item.table}", structure.LED_LABELS[item.led_type])
 
     return transfer.run(conn, storage, account, location, event_id, items, operation=OPERATION,
                         folder_for=lambda item: localfiles.open_subfolder(event_dir, f"Table {item.table}",

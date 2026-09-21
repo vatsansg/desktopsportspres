@@ -34,7 +34,7 @@ def rpi_items(comparison: changes.Comparison, event_dir=None) -> list[changes.As
         missing = localfiles.missing_files(Path(event_dir), [a.file_name for a in candidates]) if candidates else set()
         if missing is not None:
             items += [dataclasses.replace(a, action=changes.DOWNLOAD, label=changes.LABEL_NEW,
-                                          reason="The file is not in the RPI folder.")
+                                          reason="The file is not in the RPI folder.", repair=True)
                       for a in candidates if a.file_name in missing]
     return items
 
