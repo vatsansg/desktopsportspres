@@ -89,7 +89,7 @@ def test_valid_file_registers_the_event_and_shows_it_on_the_dashboard(app, cfg, 
 
     html = dashboard(logged_in)
     assert "Event 1000 (Star contender Doha) registered from Azure Storage." in html
-    assert ">1000</td>" in html and "Star contender Doha" in html
+    assert ">1000</a>" in html and "Star contender Doha" in html and "/events/1000" in html
     assert "18/09/26 10:02" in html                       # owner: Last Updated = export time, local zone
     assert 'badge-registered' in html and "1 registered" in html
 

@@ -44,6 +44,8 @@ MAX_EVENT_ID_LENGTH = 50
 MAX_NAME_LENGTH = 200
 MAX_URL_LENGTH = 2048
 
+# Would be shadowed by the /events/new and /events/reregister pages, so an event could never be opened.
+RESERVED_EVENT_IDS = frozenset({"new", "reregister"})
 _EVENT_ID_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]{0,%d}$" % (MAX_EVENT_ID_LENGTH - 1))
 _GUID_RE = re.compile(r"^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$")
 _NIL_GUID = "00000000-0000-0000-0000-000000000000"
@@ -140,6 +142,8 @@ def validate_event_id_input(text: str) -> str:
     value = (text or "").strip()
     if not value:
         raise InputError("Enter the Event ID.")
+    if value.casefold() in RESERVED_EVENT_IDS:
+        raise InputError("That Event ID cannot be used. Enter the number shown in the web application.")
     if not _EVENT_ID_RE.match(value):
         raise InputError(
             f"The Event ID may use letters, numbers, dot, dash and underscore only "
@@ -216,7 +220,7 @@ def parse_event_config(data: bytes) -> EventConfig:
         raise _invalid("The configuration must be a JSON object.")
 
     event_id = _string(obj, "eventId", MAX_EVENT_ID_LENGTH)
-    if not _EVENT_ID_RE.match(event_id):
+    if not _EVENT_ID_RE.match(event_id) or event_id.casefold() in RESERVED_EVENT_IDS:
         raise _invalid("The field 'eventId' is not a valid Event ID.")
     event_name = _string(obj, "eventName", MAX_NAME_LENGTH)
 
@@ -311,6 +315,8 @@ def register_event(conn: sqlite3.Connection, entered_event_id: str, config: Even
             (config.event_id, config.event_name, config.guid, source, config.raw_text,
              config.export_timestamp, config.export_timestamp, STATUS_REGISTERED),
         )
+        from . import mappings, structure          # (function-level import: structure imports this module)
+        mappings.reconcile(conn, config.event_id, structure.from_config(config).enabled_pairs)
         oplog.add(conn, "Event Registered", "Success",
                   f"Event {config.event_id} registered ({len(config.tables)} table(s)); "
                   f"GUID {config.guid}; source: {source}.", event_id=config.event_id)
@@ -358,6 +364,8 @@ def reregister_event(conn: sqlite3.Connection, entered_event_id: str, config: Ev
             (config.event_name, config.guid, source, config.raw_text, config.export_timestamp,
              config.export_timestamp, STATUS_REGISTERED, entered_event_id),
         )
+        from . import mappings, structure
+        mappings.reconcile(conn, entered_event_id, structure.from_config(config).enabled_pairs, reset_status=True)
         oplog.add(conn, "Event Re-registered", "Success",
                   f"Event {entered_event_id} re-registered: GUID {old_guid} -> {config.guid}; "
                   f"source: {source}.", event_id=entered_event_id)

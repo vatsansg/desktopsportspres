@@ -198,3 +198,20 @@ a.btn-secondary[href] { text-decoration: none; }
 /* A definition list inside a form panel is a plain summary, not a second box. */
 .panel .kv { background: transparent; border: 0; border-top: 1px solid var(--border-subtle); border-radius: 0;
              padding: 1.25rem 0 0; margin: 1.5rem 0 1.5rem; }
+
+/* ---- Event details ---- */
+.crumb { margin: 0 0 0.75rem; }
+.crumb a, .row-link { color: var(--text); text-underline-offset: 3px; }
+.crumb a:hover, .row-link:hover { color: var(--wtt-blue); }
+.block { margin-top: 2rem; }
+.led-on { color: var(--status-ok); font-weight: 700; white-space: nowrap; }
+.led-off { color: var(--text-muted); white-space: nowrap; }
+.data-table tbody th { text-align: left; font-weight: 700; white-space: nowrap; }
+.map-table td { vertical-align: middle; }
+.cell-input { min-height: 40px; padding: 0 0.6rem; }
+.ip-input { width: 100%; min-width: 8.5rem; }
+.map-table .mono-input { width: 100%; min-width: 16rem; }
+.tested-at { display: block; margin-top: 0.25rem; color: var(--text-muted); font-size: 0.85rem; white-space: nowrap; }
+.btn-sm { min-height: 36px; padding: 0 0.9rem; }
+.hidden-maps summary { cursor: pointer; font-weight: 700; padding: 0.4rem 0; }
+.hidden-maps ul { margin: 0.5rem 0 0; padding-left: 1.25rem; color: var(--text-muted); }

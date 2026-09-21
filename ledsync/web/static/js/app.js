@@ -31,7 +31,9 @@ document.addEventListener("submit", function (event) {
   setTimeout(function () {
     var buttons = form.querySelectorAll('button[type="submit"]');
     for (var i = 0; i < buttons.length; i++) { buttons[i].disabled = true; }
-    if (submitter && submitter.classList.contains("btn-primary")) { submitter.textContent = text; }
+    var label = submitter && submitter.getAttribute("data-busy-label");
+    if (label) { submitter.textContent = label; }
+    else if (submitter && submitter.classList.contains("btn-primary")) { submitter.textContent = text; }
   }, 0);
 });
 

@@ -1,0 +1,97 @@
+{% extends "base.html" %}
+{% block title %}{{ event.event_name }} — {{ app_name }}{% endblock %}
+{% block body %}
+{% include "_topbar.html" %}
+<main class="page">
+  <p class="crumb"><a href="{{ url_for('views.dashboard') }}">&larr; Dashboard</a></p>
+  <h1>{{ event.event_name }}</h1>
+  <p class="lede">Event {{ event.event_id }} &middot; {{ event.status or "Registered" }}</p>
+
+  {% for category, message in get_flashed_messages(with_categories=true) %}
+  <p class="alert alert-{{ category }}" role="{{ 'alert' if category == 'error' else 'status' }}">{{ message }}</p>
+  {% endfor %}
+  {% if error %}
+  <p id="form-error" data-focus-alert class="alert alert-error" role="alert">{{ error }}</p>
+  {% endif %}
+
+  {% if structure_error %}
+  <p class="alert alert-error" role="alert">{{ structure_error }}</p>
+  {% else %}
+
+  <section aria-labelledby="led-heading" class="block">
+    <h2 id="led-heading">LED Configuration</h2>
+    <p class="hint">Exactly what the web application exported for this event. This cannot be edited here.</p>
+    <div class="table-wrap">
+      <table class="data-table">
+        <caption class="sr-only">LED types enabled for each table</caption>
+        <thead><tr><th scope="col">Table</th>
+          {% for t in led_types %}<th scope="col">{{ led_labels[t] }}</th>{% endfor %}</tr></thead>
+        <tbody>
+          {% for tb in structure.tables %}
+          <tr><th scope="row">Table {{ tb.number }}</th>
+            {% for t in led_types %}
+            <td>{% if tb.enabled(t) %}<span class="led-on">&#10003; Enabled</span>{% else %}<span class="led-off">&mdash; Not used</span>{% endif %}</td>
+            {% endfor %}</tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+  </section>
+
+  <section aria-labelledby="map-heading" class="block">
+    <h2 id="map-heading">Device Mapping</h2>
+    <p class="hint">For each enabled LED, enter the device's IP address (optional) and the Windows shared folder its files go to,
+      for example <span class="mono">\\device01\Inner</span>. Testing saves your entries first. This application stores no passwords: it uses the
+      access of the Windows account it runs under.</p>
+
+    {% if rows %}
+    <form method="post" action="{{ url_for('devices.save_or_test', event_id=event.event_id) }}" novalidate
+          data-busy-text="WORKING…">
+      <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+      <div class="table-wrap" tabindex="0" role="region" aria-label="Device mapping table">
+        <table class="data-table map-table">
+          <caption class="sr-only">One row per enabled LED: IP address, shared folder and connection status</caption>
+          <thead><tr>
+            <th scope="col">Table</th><th scope="col">LED</th><th scope="col">IP address</th>
+            <th scope="col">Shared folder</th><th scope="col">Status</th><th scope="col"><span class="sr-only">Test</span></th>
+          </tr></thead>
+          <tbody>
+            {% for r in rows %}
+            <tr>
+              <td class="nowrap">Table {{ r.table }}</td>
+              <td class="nowrap">{{ r.led }}</td>
+              <td><input type="text" name="{{ r.ip_name }}" value="{{ r.ip }}" maxlength="45" autocomplete="off"
+                         spellcheck="false" class="cell-input ip-input" aria-label="IP address for {{ r.label }}"></td>
+              <td><input type="text" name="{{ r.folder_name }}" value="{{ r.folder }}" maxlength="240" autocomplete="off"
+                         spellcheck="false" class="cell-input mono-input" aria-label="Shared folder for {{ r.label }}"></td>
+              <td><span class="badge badge-{{ r.status_class }}">{{ r.status }}</span>
+                  {% if r.tested %}<span class="tested-at">{{ r.tested }}</span>{% endif %}</td>
+              <td><button type="submit" name="action" value="test:{{ r.key }}" class="btn btn-secondary btn-sm"
+                          data-busy-label="Testing…" aria-label="Test connection for {{ r.label }}">Test</button></td>
+            </tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      </div>
+      <p class="hint">Times are shown in this computer's local time. A folder can be used by only one destination.</p>
+      <div class="form-actions">
+        <button type="submit" name="action" value="save" class="btn btn-primary">SAVE MAPPING</button>
+        <button type="submit" name="action" value="test-all" class="btn btn-secondary" data-busy-label="Testing…">Test All Connections</button>
+        <a class="btn btn-secondary" href="{{ url_for('views.dashboard') }}">Back to Dashboard</a>
+      </div>
+    </form>
+    {% else %}
+    <p class="panel">This event has no enabled LEDs to map.</p>
+    {% endif %}
+
+    {% if hidden %}
+    <details class="block hidden-maps">
+      <summary>Previously mapped &mdash; no longer part of this event ({{ hidden|length }})</summary>
+      <p class="hint">Kept in case the LED is enabled again; not used while it is not in the event.</p>
+      <ul>{% for m in hidden %}<li>{{ m.label }} &mdash; <span class="mono">{{ m.shared_folder }}</span></li>{% endfor %}</ul>
+    </details>
+    {% endif %}
+  </section>
+  {% endif %}
+</main>
+{% endblock %}
