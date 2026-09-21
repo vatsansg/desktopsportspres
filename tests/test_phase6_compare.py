@@ -124,7 +124,8 @@ def test_an_older_deletion_does_not_remove_a_newer_download():
 # --- entries that do not apply to this event --------------------------------------------------------------------------
 
 @pytest.mark.parametrize("path,fragment", [
-    ("RPI/HOME_Look.png", "not inside a Table"),
+    ("Other/HOME_Look.png", "not inside a Table"),
+    ("RPI/sub/x.png", "sub-folders of RPI"),
     ("HOME_Look.png", "not inside a Table / LED-type folder"),
     ("Table 1/Inner/sub/x.png", "sub-folders"),
     ("Table 9/Inner/x.png", "Table 9 Inner is not part of this event"),
@@ -157,9 +158,15 @@ def test_table_numbers_with_a_leading_zero_are_refused_not_treated_as_a_second_c
     assert a.action == changes.NOT_APPLICABLE and "leading zero" in a.reason
 
 
-def test_a_file_with_no_extension_is_still_listed_as_a_normal_entry():
-    a = changes.compare(parsed([("Table 1/MainLED/HOME_Look", T0, "New")]), real_structure(), {}).assessments[0]
-    assert a.action == changes.DOWNLOAD and a.file_name == "HOME_Look"
+@pytest.mark.parametrize("path", ["Table 1/MainLED/HOME_Look", "Table 1/Inner/.hidden", "RPI/README"], ids=lambda v: v[-12:])
+def test_a_file_with_no_extension_is_not_an_asset(path):
+    a = changes.compare(parsed([(path, T0, "New")]), real_structure(), {}).assessments[0]
+    assert a.action == changes.NOT_APPLICABLE and "no extension" in a.reason
+
+
+def test_rpi_files_are_their_own_destination():
+    a = changes.compare(parsed([("RPI/HOME_Look.png", T0, "New")]), real_structure(), {}).assessments[0]
+    assert (a.action, a.led_type, a.table, a.file_name) == (changes.DOWNLOAD, "RPI", None, "HOME_Look.png")
 
 
 def test_results_are_ordered_by_table_led_and_name_with_not_applicable_last():

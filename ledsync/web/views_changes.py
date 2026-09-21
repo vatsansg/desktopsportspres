@@ -8,9 +8,10 @@ contacting Azure again; it is rebuilt by the next CHECK FOR CHANGES.
 from flask import Blueprint, current_app, flash, redirect, render_template, session, url_for
 
 from .. import APP_NAME, __version__
-from ..services import changes, settings as cloud_settings
+from ..services import changes, localfiles, rpi, settings as cloud_settings
 from ..services import events as event_service
-from ..services import structure
+from ..services import localchangelog, structure
+from ..services.storage import EventLocation
 from .app_db import get_db
 from .security import login_required
 from .views_devices import _load
@@ -31,7 +32,7 @@ def _key(event_id: str) -> str:
 
 
 def _row(a: changes.Assessment, tz) -> dict:
-    return dict(path=a.path, table=a.table, led=structure.LED_LABELS.get(a.led_type or "", ""), file=a.file_name,
+    return dict(path=a.path, table=a.table, led=structure.LED_LABELS.get(a.led_type or "", a.led_type or ""), file=a.file_name,
                 cloud_status=a.cloud_status, changed=event_service.format_timestamp(a.cloud_time_text, tz),
                 action=a.action, label=a.label, reason=a.reason, revisions=a.revisions)
 
@@ -61,7 +62,9 @@ def page(event_id):
                                    limit=SHOW_LIMIT),
                    done=_section(c, changes.DONE, tz), na=_section(c, changes.NOT_APPLICABLE, tz),
                    n_new=c.count_label(changes.LABEL_NEW), n_updated=c.count_label(changes.LABEL_UPDATED),
-                   n_removed=c.count_label(changes.LABEL_REMOVED), skipped=c.skipped[:20], future=report.future_dated)
+                   n_removed=c.count_label(changes.LABEL_REMOVED), skipped=c.skipped[:20], future=report.future_dated,
+                   rpi_waiting=len(rpi.rpi_items(c)))
+    ctx["rpi_folder"] = cloud_settings.load_rpi_folder(get_db(), current_app.config["LEDSYNC"].data_dir)
     return render_template("event_changes.html", **ctx)
 
 
@@ -86,3 +89,43 @@ def check(event_id):
           f"{c.count(changes.DOWNLOAD)} to download, {c.count(changes.DELETE)} to remove, "
           f"{c.count(changes.DONE)} already processed. Nothing was downloaded or changed.", "success")
     return redirect(url_for("changes.page", event_id=row["event_id"]))
+
+
+@bp.post("/<event_id>/changes/rpi")
+@login_required
+def download_rpi(event_id):
+    """Download / remove the event's RPI files (only those). Table files are Phase 7."""
+    row = _load(event_id)
+    db = get_db()
+    config = current_app.config["LEDSYNC"]
+    settings = cloud_settings.load_cloud(db)
+    back = redirect(url_for("changes.page", event_id=row["event_id"]))
+    if not settings.configured:
+        flash(NOT_CONFIGURED, "error")
+        return back
+    storage = current_app.extensions["ledsync.storage_factory"](settings)
+    try:
+        report = changes.check_event(db, storage, settings, row["event_id"])        # always from a fresh read
+    except changes.CheckError as err:
+        flash(err.message, "error")
+        return back
+    folder = cloud_settings.load_rpi_folder(db, config.data_dir)
+    try:
+        result = rpi.process(db, storage, settings.account, EventLocation(report.container, report.folder),
+                             row["event_id"], report.comparison, folder.effective, config.data_dir)
+    except localfiles.LocalFileError as err:
+        flash(err.args[0], "error")
+        return back
+    localchangelog.write(config.data_dir, db, current_app.config.get("DISPLAY_TZ"))
+    try:
+        _reports()[_key(row["event_id"])] = changes.check_event(db, storage, settings, row["event_id"])
+    except changes.CheckError:
+        _reports().pop(_key(row["event_id"]), None)
+    if result.total == 0:
+        flash("There were no RPI files to download or remove.", "info")
+        return back
+    flash(f"RPI files: {result.downloaded} downloaded, {result.removed} removed, {result.failed} failed. "
+          f"Saved in {folder.effective}.", "success" if not result.failed else "error")
+    for failure in result.failures[:10]:
+        flash(failure, "error")
+    return back

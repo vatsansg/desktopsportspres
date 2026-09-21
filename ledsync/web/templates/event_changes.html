@@ -14,7 +14,7 @@
   <section aria-labelledby="check-heading" class="block">
     <h2 id="check-heading">Check For Changes</h2>
     <p class="hint">Reads this event's change log from Azure Storage and compares it with what this application has already
-      processed. Nothing is downloaded, deleted or sent to the LED devices from this page.</p>
+      processed. The check itself downloads nothing. Table and LED files are downloaded in the next phase; RPI files can be downloaded below.</p>
     <form method="post" action="{{ url_for('changes.check', event_id=event.event_id) }}" novalidate data-busy-text="CONTACTING AZURE…">
       <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
       <div class="form-actions">
@@ -43,18 +43,34 @@
     </ul>
   </section>
 
+  <section aria-labelledby="rpi-heading" class="block">
+    <h2 id="rpi-heading">RPI Files</h2>
+    <p class="hint">Files in the event's <span class="mono">RPI</span> folder are saved to
+      <span class="mono">{{ rpi_folder.effective }}</span>. <a href="{{ url_for('settings.folders') }}">Change the folder in Settings</a>.</p>
+    {% if rpi_waiting %}
+    <form method="post" action="{{ url_for('changes.download_rpi', event_id=event.event_id) }}" novalidate data-busy-text="DOWNLOADING…">
+      <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+      <div class="form-actions">
+        <button type="submit" class="btn btn-secondary" data-busy-label="Downloading…">Download RPI Files ({{ rpi_waiting }})</button>
+      </div>
+    </form>
+    {% else %}
+    <p class="panel">No RPI files are waiting.</p>
+    {% endif %}
+  </section>
+
   <section aria-labelledby="todo-heading" class="block">
     <h2 id="todo-heading">Waiting To Be Processed ({{ to_process.total }})</h2>
     {% if to_process.rows %}
     <div class="table-wrap" tabindex="0" role="region" aria-label="Files waiting to be processed">
       <table class="data-table">
-        <caption class="sr-only">New, updated and removed files</caption>
+        <caption class="sr-only">New, updated and removed files (RPI files show a dash for the table)</caption>
         <thead><tr><th scope="col">Table</th><th scope="col">LED</th><th scope="col">File</th><th scope="col">Changed</th>
           <th scope="col">Cloud Status</th><th scope="col">Next Step</th></tr></thead>
         <tbody>
           {% for r in to_process.rows %}
           <tr>
-            <td class="nowrap">Table {{ r.table }}</td><td class="nowrap">{{ r.led }}</td><td>{{ r.file }}</td>
+            <td class="nowrap">{% if r.table is not none %}Table {{ r.table }}{% else %}&mdash;{% endif %}</td><td class="nowrap">{{ r.led }}</td><td>{{ r.file }}</td>
             <td class="nowrap">{{ r.changed }}</td><td>{{ r.cloud_status }}</td>
             <td><span class="badge {{ 'badge-attention' if r.action == 'Delete local copy' else 'badge-ready' }}">{{ r.label }}</span>
                 <span class="tested-at">{{ r.reason }}</span></td>
@@ -78,7 +94,7 @@
         <thead><tr><th scope="col">Table</th><th scope="col">LED</th><th scope="col">File</th><th scope="col">Changed</th><th scope="col">Note</th></tr></thead>
         <tbody>
           {% for r in done.rows %}
-          <tr><td class="nowrap">Table {{ r.table }}</td><td class="nowrap">{{ r.led }}</td><td>{{ r.file }}</td>
+          <tr><td class="nowrap">{% if r.table is not none %}Table {{ r.table }}{% else %}&mdash;{% endif %}</td><td class="nowrap">{{ r.led }}</td><td>{{ r.file }}</td>
               <td class="nowrap">{{ r.changed }}</td><td>{{ r.reason }}</td></tr>
           {% endfor %}
         </tbody>

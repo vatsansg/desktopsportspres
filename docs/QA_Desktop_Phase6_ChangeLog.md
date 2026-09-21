@@ -5,7 +5,7 @@
 | Field | Value |
 |---|---|
 | Application | Desktop |
-| Step / Phase | Phase 6 — Change Log and Incremental Download Logic, **no file downloads yet** (Step 6.1 retrieve and parse the cloud change log, Step 6.2 local change log, Step 6.3 incremental comparison) |
+| Step / Phase | Phase 6 — Change Log and Incremental Download Logic (Step 6.1 retrieve and parse the cloud change log, Step 6.2 local change log, Step 6.3 incremental comparison). **Table / LED file downloads are Phase 7; the owner asked for the event's `RPI` files to be downloaded now (see below).** |
 | BRD reference(s) | Desktop BRD Sections 15 (steps 4–5), 16 (cloud change log, v2.4 full-path note), 17 (local change log), 18 (incremental logic), 21 (error categories), 36 (open points: cut-off, local change log filename) |
 | Implementation Sequence reference | Steps 6.1, 6.2, 6.3 |
 | Date | 21/09/26 |
@@ -18,7 +18,8 @@
 - **Deleted entries:** listed, and queued as **"Delete local copy"** when a successful local copy older than the deletion exists. **Nothing is deleted in this phase** — there are no local copies yet; the deletion itself is done in Phase 7 (with a safe-path guard). LED-device folders are not touched by this rule.
 - **Local change log:** the **database is the record** (`download_history`); **`_localchangelog.csv`** in the application data folder is its CSV copy with the BRD §17 columns, one file for all events.
 - **Screen:** a separate **Change Log** page per event (link on the Event Details page), one orange **CHECK FOR CHANGES** button.
-- Defaults I chose (tell me if any is wrong): the real file name `_ledassetschangelog.csv` is read first, the BRD spelling second; a file is identified by its **full path** matched **ignoring case**; entries that are not exactly `Table N/<LED type>/<file>` for a table and LED type the event enables are **Not applicable** (never acted on); a file with no extension is treated as a normal asset; the check is read-only and its result is kept in memory (a restart clears it — the next phase re-checks before downloading).
+- **RPI files (owner, 21/09/26):** `RPI/<file>` entries are real assets that belong in an **RPI folder on this computer**, set in **Settings → Local Folders** (default: an `RPI` folder inside the application data folder). A **Download RPI Files** button on the Change Log page downloads new/updated RPI files and removes the local copy of RPI files deleted in the cloud. **Files with no extension are not assets** and are ignored (listed as not applicable). Table and LED files are still not downloaded here.
+- Defaults I chose (tell me if any is wrong): the real file name `_ledassetschangelog.csv` is read first, the BRD spelling second; a file is identified by its **full path** matched **ignoring case**; entries that are not exactly `Table N/<LED type>/<file>` for a table and LED type the event enables are **Not applicable** (never acted on); the RPI folder is **flat** (`<RPI folder>\<file name>`, shared by all events, as you described it); the check is read-only and its result is kept in memory (a restart clears it — the next phase re-checks before downloading).
 
 ## How to test in the real app (for the user)
 
@@ -52,6 +53,18 @@ Sign in. The key comes from your git-ignored `.env`, so **ADD NEW EVENT → `100
 | 15 | *(optional)* turn Wi-Fi off, CHECK FOR CHANGES | Within seconds: "Could not reach Azure Storage. Check the internet connection…"; on again → works | TC-M15 |
 | 16 | Keyboard only: Tab through the page (back link → topbar → CHECK FOR CHANGES → Back to Event → the summary → tables and the "Already processed"/"Not applicable" sections) | Visible focus ring on every control; Enter/Space opens the sections | TC-M16 |
 
+**RPI steps (new)** — continue in the same app window (remove the pretend rows first with `insert_test_history.py --clear` if you added them):
+
+| # | Do this | Expect | Covers |
+|---|---|---|---|
+| 17 | Click **Settings** → **Local Folders** | A page with the RPI folder box (empty), "Files are saved to `%TEMP%\ledsync-test-p6\RPI`" and a **Default folder** badge; one orange **SAVE FOLDERS** | TC-M17 |
+| 18 | Type `relative\RPI` → SAVE FOLDERS | Red message, the text stays in the box, nothing saved. Also try `C:\Windows\RPI` → refused | TC-M18 |
+| 19 | Event 1000 → Change Log → CHECK FOR CHANGES | An **RPI Files** section shows the folder and a plain **Download RPI Files (1)** button. In the waiting list the row reads `—` / `RPI` / `HOME_Look.png`. `Table 1/MainLED/HOME_Look` (no extension) is under Not Applicable: "The file has no extension, so it is not an asset." | TC-M19 |
+| 20 | Click **Download RPI Files (1)** | Green: "RPI files: 1 downloaded, 0 removed, 0 failed. Saved in …\RPI." Open `%TEMP%\ledsync-test-p6\RPI` — **`HOME_Look.png` is there and opens as the image** (about 480 KB). The section now says "No RPI files are waiting." and the Waiting list drops by one. Nothing else was downloaded (no Table folders) | TC-M20 |
+| 21 | Press the button's page again / CHECK FOR CHANGES | "No RPI files are waiting."; the file is listed under **Already Processed** | TC-M21 |
+| 22 | Open `%TEMP%\ledsync-test-p6\_localchangelog.csv` and the database | One data row: Event `1000`, Table empty, LED Type `RPI`, File `HOME_Look.png`, Download Status `Success`. `download_history` has the same row; `operation_log` has an *RPI Files* row | TC-M22 |
+| 23 | **Your own folder:** close the app, start it again with a **fresh** scratch data folder (`$env:LEDSYNC_DATA_DIR = "$env:TEMP\ledsync-test-p6b"`, create it, `python -m ledsync`), register `1000`, then **Settings → Local Folders → `C:\LED\RPI` → SAVE FOLDERS** ("Your folder" badge), then Change Log → CHECK FOR CHANGES → **Download RPI Files** | `HOME_Look.png` appears in **`C:\LED\RPI`** (created if missing) and **not** in the default folder | TC-M23 |
+
 Clean up: close the app, then `Remove-Item -Recurse -Force "$env:TEMP\ledsync-test-p6"`.
 
 **About the two-table validation case** (Sequence Step 6.1: "a test event with two tables, each with `sponsorsequence.csv` in Inner and Outer"): the real Event 1000 has that file in **Table 1** Inner and Outer only, and I cannot write test data to your Azure. The four-distinct-entries case, and the "update in one folder only" case, are covered by automated tests (TC-A04) on synthetic logs. If you want to see it on real data, ask the web-app team to add `sponsorsequence.csv` to Table 2's folders.
@@ -62,9 +75,9 @@ Live check (read-only, re-runnable): `.\.venv\Scripts\python -m pytest -q --live
 
 | Total cases | Passed | Failed | Blocked | Not yet run |
 |---|---|---|---|---|
-| 34 | 18 (14 automated groups covering 198 new pytest cases, 3 live checks against real Azure, 1 rendered-page group — all run by Claude) | 0 | 0 | 16 (manual TC-M01 – TC-M16, for the owner) |
+| 43 | 20 (15 automated groups covering 263 new pytest cases, 4 live checks against real Azure, 1 rendered-page group — all run by Claude) | 0 | 0 | 23 (manual TC-M01 – TC-M23, for the owner) |
 
-`.\.venv\Scripts\python -m pytest -q` → **1042 passed, 8 skipped** (the 8 are the live-Azure tests, which need `--live`); `--live` → **8 passed** against real Azure (read-only).
+`.\.venv\Scripts\python -m pytest -q` → **1107 passed, 8 skipped** (the 8 are the live-Azure tests, which need `--live`); `--live` → **9 passed** against real Azure (read-only).
 
 ## Live validation against the real Azure account (read-only, 21/09/26)
 
@@ -72,6 +85,7 @@ Live check (read-only, re-runnable): `.\.venv\Scripts\python -m pytest -q --live
 |---|---|---|
 | TC-L01 | Download the real `_ledassetschangelog.csv` of Event 1000 through the real app code and parse it | Pass — 84 rows, 0 unreadable; columns `sno, filename, changetimestamp, status, username`; 58 New / 21 Updated / 5 Deleted; timestamps UTC |
 | TC-L02 | Compare against an empty local record | Pass — 53 distinct files; `Table 1/Inner/sponsorsequence.csv` and `Table 1/Outer/sponsorsequence.csv` are **separate** entries; `RPI/HOME_Look.png` is **Not applicable**; a file with no extension (`Table 1/MainLED/HOME_Look`) is listed as an ordinary asset |
+| TC-L04 | **The real RPI file:** the real `RPI/HOME_Look.png` (Azure holds it as lower-case `rpi/HOME_Look.png`) is located by name, downloaded read-only and saved as `HOME_Look.png` in the scratch RPI folder | Pass — **489,580 bytes, valid PNG**; the only file in the folder; history and local change log rows correct; no key anywhere; the real application data folder untouched |
 | TC-L03 | The whole check through the real page, with the real key | Pass — nothing written to Azure; no key anywhere in the page; `download_history` stays empty; `_localchangelog.csv` has only its header row |
 
 ## Test cases — automated
@@ -91,6 +105,7 @@ Live check (read-only, re-runnable): `.\.venv\Scripts\python -m pytest -q --live
 | TC-A11 | **Safety:** a check only reads Azure and changes no file, no history, no mapping, no event; it is audited with counts only; hostile file names (`<script>`, attribute breakouts, formulas) are escaped | Pass |
 | TC-A12 | **Seed script (dev only):** refuses without a scratch folder, in the real data folder, in a folder that does not exist, and when the event is not registered; adds three marked rows once; `--clear` removes only those | Pass |
 | TC-A14 | **Independent-review regression tests** (83): 22 Windows-dangerous names skipped and reported, 17 ordinary real-world names still accepted, a path is never trimmed, over-long paths refused; look-alike table folders (`Table 01`, `0001`, `0`, Arabic-Indic digit) never create a second download; six pairs of names Windows could treat as one file (`ß`/`ss`, Kelvin sign, sigma, micro, long s, accent forms) are listed as not applicable, never merged or queued; a database error never empties the local change log (existing file untouched; headers created only if none exists); ten formula-start characters neutralised; an unexpected exception is a plain message with an exception row and a *Failed* audit row, and a failure to log never hides the real message; a saved result is dropped when the registration or local history changes; same-time entries settle by file order; a removal older than the local copy keeps the copy; removals are listed before downloads; far-future entries are pointed out | Pass |
+| TC-A15 | **RPI (65 tests):** real blob names found in any A–Z letter case, ambiguous names refused, folder-vs-file, prefix neighbours, unsafe paths refused before any listing, only reads; the safe writer (atomic replace, 14 unsafe names refused for write **and** delete, a folder or **junction** with the file name is never replaced, followed or deleted, a failed write leaves no temp file); folder rules (created when missing, Windows folders and the data folder refused); the setting (default inside the data folder, save/reset, 8 unsafe folders refused, audit, own-keys scope); the Settings pages (gated, navigation, default shown, save, bad folder explained); the whole flow (download to the default and to a chosen folder, history + local change log + last-download, second press does nothing, update replaces, deletion removes then a re-add restores, one bad file never stops the rest and is retried, too-large refused with the request itself capped, **only RPI files are touched**, extension-less and sub-folder entries ignored, an unusable folder is a plain message, hostile names never reach the disk, only reads Azure, gated and CSRF-protected, a re-exported event downloads nothing) | Pass |
 | TC-A13 | Earlier phases unchanged (844 earlier tests still pass; Azure read-only AST guards, key isolation, CSP all still pass with the new modules) | Pass |
 
 ## Rendered-page checks
@@ -105,7 +120,7 @@ Live check (read-only, re-runnable): `.\.venv\Scripts\python -m pytest -q --live
 |---|---|---|---|
 | F-38 | **Deleted in the cloud → delete the local copy** (owner decision) is only *decided* here. Phase 7 must carry it out safely: only inside the event's own local asset folder, never following links, never outside it, and never touching the LED-device folders (whether the push should also remove files there is not decided — Phase 8). | Medium | Carried to Phase 7/8 |
 | F-39 | The **Last Updated Timestamp Cut-off** setting (BRD §14/§18) does not exist yet; comparison is UTC with no cut-off (owner choice). Add the setting in Phase 10 (default none). | Low | Carried to Phase 10 |
-| F-40 | The real log contains entries this event cannot use (`RPI/HOME_Look.png`) and a file with **no extension** (`Table 1/MainLED/HOME_Look`); the latter is treated as an ordinary asset. Confirm with the web-app team whether it is a real asset or a mistake. | Low | Open — ask web team |
+| F-40 | `RPI/HOME_Look.png` is a real RPI asset (now downloaded to the RPI folder) and the extension-less `Table 1/MainLED/HOME_Look` is not relevant (ignored) — both settled by the owner 21/09/26. | — | Closed — decided |
 | F-41 | **Sync Status** in `_localchangelog.csv` is blank until Phase 8 records pushes. | Info | Carried to Phase 8 |
 | F-42 | The change log says `Table 1/Inner/…` but the blob folders in Azure are lower-case (`Table 1/inner/…`). Phase 7 must locate blobs case-insensitively (as Phase 4 does for the event folder) and download only from the verified location. | Medium | Carried to Phase 7 (F-29) |
 | F-43 | In `_localchangelog.csv` **Timestamp** is this computer's local time (`DD/MM/YY HH:MM`, BRD example) while **Source Updated Timestamp** is the change log's own UTC text. Say if you want both in one basis. | Info | Open — confirm |
@@ -113,6 +128,9 @@ Live check (read-only, re-runnable): `.\.venv\Scripts\python -m pytest -q --live
 | F-45 | A change log with **more than 50,000 rows** is refused as a whole (an append-only log could eventually reach that). One CSV field over 128 KB, or a stray quote that swallows the next row, also affects the file (the swallowed row is reported once). Far beyond real use (the real log has 84 rows). | Low | Accepted — revisit if the log grows |
 | F-46 | Phase 7 must **re-validate every name at the point of writing** (never trust this parser alone), refuse links, stay inside the event's folder, and resolve the real blob name (Azure names are case-sensitive; the comparison ignores A–Z case). | Medium | Carried to Phase 7 |
 | F-47 | A history row whose source time cannot be read is ignored, so its file would be downloaded again. Cannot happen through the application (Phase 7 will write valid times). | Info | Accepted |
+| F-48 | **Table 2 Inner has 24 asset files in Azure with NO change-log entry** (the log has one entry for Table 2, `sponsorsequence.csv`; the 24 images/videos uploaded to `Table 2/inner/` were never logged). A download driven by the change log will never fetch them. Found on 21/09/26 by comparing Azure's file list with the log (read-only). Either the web application must log them (it should when assets are added or copied) or Phase 7 needs a fallback that also compares Azure's file list. | **High** | **Open — decision needed (web team / Phase 7)** |
+| F-49 | The **RPI folder is flat and shared by all events**: two events with the same RPI file name would overwrite each other, though each event's history is separate. Fine for one event at a time (as described); revisit if several events run together. | Low | Open — confirm |
+| F-50 | A whole file is held in memory while downloading (50 MB cap for RPI). Large Table/LED videos need streaming in Phase 7. | Medium | Carried to Phase 7 |
 | F-12 | Earlier carry-forwards (single-instance lock, log retention, migration runner) unchanged. | — | Carried forward |
 
 ## Sign-off

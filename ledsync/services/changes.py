@@ -16,8 +16,11 @@ Rules (owner decisions 21/09/26 and the web BRD v2.4 note):
   * Deleted in the cloud, and a successful local copy older than that -> DELETE LOCAL COPY
     (owner decision; the deletion itself is carried out in Phase 7 - nothing here touches a file).
   * Everything else that is up to date -> ALREADY PROCESSED.
+  * `RPI/<file>` (directly inside the event's `RPI` folder) is its own destination: those files go
+    to the RPI folder set in Settings, not to a table or LED device (owner decision 21/09/26).
+  * A file with no extension is not an asset and is NOT APPLICABLE (owner decision 21/09/26).
   * Entries that are not `Table N/<LED type>/<file>` for a table and LED type the event actually
-    enables are listed as NOT APPLICABLE, with the reason, and are never acted on.
+    enables (or `RPI/<file>`) are listed as NOT APPLICABLE, with the reason, and are never acted on.
   * The "Last Updated Timestamp Cut-off" (BRD Section 14) is still an open BRD item; the owner
     chose UTC comparison with no cut-off for now (a setting comes with Phase 10).
 
@@ -25,6 +28,7 @@ Comparing only reads and decides: it changes no file and no database row.
 """
 
 import logging
+import os
 import re
 import sqlite3
 import unicodedata
@@ -46,6 +50,7 @@ DONE = "Already processed"
 NOT_APPLICABLE = "Not applicable"
 
 LABEL_NEW, LABEL_UPDATED, LABEL_REMOVED = "New", "Updated", "Removed in cloud"
+RPI = "RPI"                        # the pseudo LED type of files in the event's RPI folder
 
 _TABLE_RE = re.compile(r"^Table ([1-9][0-9]{0,3})$", re.IGNORECASE)     # ASCII digits only, no leading zero
 _TABLE_ZERO_RE = re.compile(r"^Table (0[0-9]{0,3})$", re.IGNORECASE)
@@ -59,8 +64,15 @@ def fold(text: str) -> str:
     return text.translate(_ASCII_LOWER)
 
 
-def path_key(table: int, led_type: str, file_name: str) -> str:
+def path_key(table, led_type: str, file_name: str) -> str:
+    if led_type == RPI:
+        return f"rpi/{fold(file_name)}"
     return f"{int(table)}/{led_type.casefold()}/{fold(file_name)}"
+
+
+def has_extension(file_name: str) -> bool:
+    """`a.png` yes; `HOME_Look` and `.hidden` no."""
+    return os.path.splitext(file_name)[1] not in ("", ".")
 
 
 def _loose(key: str) -> str:
@@ -118,12 +130,15 @@ def local_state(conn: sqlite3.Connection, event_id: str) -> dict[str, LocalRecor
                         "WHERE event_id = ? COLLATE NOCASE AND status IN ('Success', 'Deleted') "
                         "ORDER BY download_id", (event_id,)).fetchall()
     for r in rows:
-        led = structure.canonical_led_type(r["led_type"])
         when = parse_timestamp(r["source_timestamp"])
-        try:
-            table = int(r["table_number"])
-        except (TypeError, ValueError):
-            continue
+        if (r["led_type"] or "").strip().casefold() == RPI.casefold():
+            led, table = RPI, None
+        else:
+            led = structure.canonical_led_type(r["led_type"])
+            try:
+                table = int(r["table_number"])
+            except (TypeError, ValueError):
+                continue
         if led is None or not r["file_name"] or when is None:
             continue
         key = path_key(table, led, r["file_name"])
@@ -133,9 +148,20 @@ def local_state(conn: sqlite3.Connection, event_id: str) -> dict[str, LocalRecor
     return latest
 
 
-def _classify_path(path: str, enabled: set) -> tuple[int, str, str] | str:
-    """(table, canonical LED type, file name) for a usable path, or the reason it is not applicable."""
+def _classify_path(path: str, enabled: set) -> tuple[int | None, str, str] | str:
+    """(table or None, LED type or "RPI", file name) for a usable path, or the reason it is not applicable."""
+    where = _classify_folder(path, enabled)
+    if isinstance(where, tuple) and not has_extension(where[2]):
+        return "The file has no extension, so it is not an asset."
+    return where
+
+
+def _classify_folder(path: str, enabled: set) -> tuple[int | None, str, str] | str:
     parts = path.split("/")
+    if fold(parts[0]) == "rpi":
+        if len(parts) != 2:
+            return "Files inside sub-folders of RPI are not supported."
+        return None, RPI, parts[1]
     if len(parts) < 3:
         return "The file is not inside a Table / LED-type folder."
     if len(parts) > 3:
@@ -189,8 +215,8 @@ def compare(parsed: ParsedChangeLog, event_structure: structure.EventStructure,
             action, label, reason = _decide(latest, local.get(key))
             out.append(Assessment(latest.path, table, led, name, latest.status, latest.timestamp_text, latest.timestamp,
                                   action, label, reason, count))
-    out.sort(key=lambda a: (a.action == NOT_APPLICABLE, a.table or 0, LED_ORDER.get(a.led_type or "", 99),
-                            a.path.casefold(), a.path))
+    out.sort(key=lambda a: (a.action == NOT_APPLICABLE, a.table if a.table is not None else 10**6,
+                            LED_ORDER.get(a.led_type or "", 99), a.path.casefold(), a.path))
     return Comparison(tuple(out), parsed.skipped, len(parsed.entries), parsed.source_name)
 
 
@@ -230,6 +256,7 @@ class Report:
     comparison: Comparison
     checked_at: datetime
     folder: str
+    container: str = ""               # with `folder`, the verified event location in Azure
     guid: str = ""                    # the registration this result belongs to
     history_marker: tuple = ()        # (rows, newest id) of the local history when it was made
     future_dated: int = 0             # entries dated more than a day ahead of this computer's clock
@@ -297,7 +324,8 @@ def check_event(conn: sqlite3.Connection, storage, settings, event_id: str) -> R
                  f"{len(comparison.skipped)} unreadable row(s) in {comparison.source_name}.", event_id)
     now = datetime.now(timezone.utc)
     future = sum(1 for e in parsed.entries if e.timestamp > now + FUTURE_TOLERANCE)
-    return Report(event_id, comparison, now, fetched.location.folder, registered, marker, future)
+    return Report(event_id, comparison, now, fetched.location.folder, fetched.location.container, registered, marker,
+                  future)
 
 
 def _log_failure(conn, event_id, operation, category, message) -> None:

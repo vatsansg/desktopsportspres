@@ -80,7 +80,7 @@ def test_the_event_details_page_links_to_the_change_log(ev):
 def test_before_any_check_the_page_explains_and_offers_one_orange_button(ev):
     html = page(ev)
     assert "No check has been run yet" in html and html.count("btn-primary") == 1 and "CHECK FOR CHANGES" in html
-    assert "Nothing is downloaded" in html and "data-busy-text" in html
+    assert "downloads nothing" in html and "data-busy-text" in html
 
 
 # --- a real check (fake Azure) -------------------------------------------------------------------------------------------
@@ -95,7 +95,8 @@ def test_the_real_exported_change_log_is_listed_with_the_four_way_split_intact(e
         distinct = len({row["filename"].casefold() for row in csv.DictReader(handle)})       # counted independently
     assert f"83 entries covering {distinct} distinct files" in text
     assert "Table 1 Inner sponsorsequence.csv" in text and "Table 1 Outer sponsorsequence.csv" in text
-    assert "RPI/HOME_Look.png" in html and "Table / LED-type folder" in text
+    assert "HOME_Look.png" in html and "RPI" in text                          # an RPI file, now a real destination
+    assert "Table 1/MainLED/HOME_Look" in html and "no extension" in text      # the extension-less file is not an asset
     assert "file _ledassetschangelog.csv" in text
 
 
@@ -113,10 +114,10 @@ def test_counts_and_rows_for_a_known_log_with_history(ev, cfg):
     conn.close()
     html = check(ev).get_data(as_text=True)
     text = text_of(html)
-    assert "Waiting To Be Processed (4)" in text                     # new, upd, gone (delete), x
-    assert "New 2 Updated 1 Removed In Cloud 1 Already Processed 2 Not Applicable 2 Unreadable Rows 0" in text
+    assert "Waiting To Be Processed (5)" in text                     # new, upd, gone (delete), x and the RPI file
+    assert "New 3 Updated 1 Removed In Cloud 1 Already Processed 2 Not Applicable 1 Unreadable Rows 0" in text
     assert "the local copy will be deleted" in text and "Table 2 Outer is not part of this event" in text
-    assert "Already Processed (2)" in text and "Not Applicable To This Event (2)" in text
+    assert "Already Processed (2)" in text and "Not Applicable To This Event (1)" in text
 
 
 def test_the_result_survives_a_reload_without_contacting_azure_again(ev):

@@ -236,7 +236,7 @@ LITERAL_GETATTR_OK = {"name", "status_code", "frozen", "winerror"}
 SDK_READ_CALLS = {"list_containers", "get_container_client", "walk_blobs", "get_blob_client", "download_blob", "readall"}
 PYTHON_HELPER_CALLS = {"__init__", "_containers_to_search", "_folders_for_event", "_search",
                        "_year_containers_newest_first", "append", "blob_path", "casefold", "compile", "endswith",
-                       "fullmatch", "getLogger", "search", "split", "startswith"}
+                       "fullmatch", "getLogger", "join", "search", "split", "startswith", "translate"}
 
 
 def _modules():

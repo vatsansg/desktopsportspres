@@ -34,6 +34,7 @@ RETRY_TOTAL = 1              # one retry: an offline venue must fail in seconds,
 YEAR_CONTAINER_RE = re.compile(r"[0-9]{4}")
 MAX_TOP_LEVEL_FOLDERS = 20000
 _UNSAFE_PATH = re.compile(r"[\x00-\x1f\x7f\\]")
+_ASCII_LOWER = {ord(c): ord(c) + 32 for c in "ABCDEFGHIJKLMNOPQRSTUVWXYZ"}
 
 
 class StorageError(Exception):
@@ -199,6 +200,47 @@ class AzureReadOnlyStorage:
                 f"More than one folder in container {container} starts with '{event_id} - '. "
                 "The event cannot be identified; ask the web application administrator to check the storage.")
         return EventLocation(container, folders[0])
+
+    # --- locating a file whose path is written in another letter case ----------------------------
+    def resolve_relative_path(self, location: EventLocation, relative_path: str) -> str:
+        """The REAL path (inside the event folder) of a file the change log names in any A-Z letter
+        case: the log says `RPI/HOME_Look.png` while Azure holds `rpi/HOME_Look.png`, and Azure blob
+        names are case-sensitive. Each level is looked up by listing (a read), never guessed.
+        Raises StorageError if nothing matches or if two different names match (ambiguous)."""
+        location.blob_path(relative_path)                              # validates the path
+        wanted = relative_path.split("/")
+        prefix = location.folder + "/"
+        real: list[str] = []
+        try:
+            client = self._service.get_container_client(location.container)
+            for depth, part in enumerate(wanted):
+                is_file = depth == len(wanted) - 1
+                matches = []
+                for item in client.walk_blobs(name_starts_with=prefix, delimiter="/"):
+                    name = getattr(item, "name", "")
+                    if not name.startswith(prefix):
+                        continue
+                    leaf = name[len(prefix):]
+                    is_folder = leaf.endswith("/")
+                    leaf = leaf[:-1] if is_folder else leaf
+                    if "/" in leaf or is_folder == is_file:
+                        continue
+                    if leaf.translate(_ASCII_LOWER) == part.translate(_ASCII_LOWER):
+                        matches.append(leaf)
+                if not matches:
+                    raise StorageError(exceptions.MISSING_FOLDER,
+                                       f"The file {relative_path} was not found in the event folder.")
+                if len(matches) > 1:
+                    raise StorageError(exceptions.CONFIGURATION,
+                                       f"More than one file in the event folder matches {relative_path} apart from "
+                                       "letter case, so it was not used. Ask the web application administrator to rename one.")
+                real.append(matches[0])
+                prefix += matches[0] + "/"
+        except StorageError:
+            raise
+        except Exception as exc:                                       # noqa: BLE001
+            raise map_error(exc, f"looking for {relative_path}") from None
+        return "/".join(real)
 
     # --- downloading -----------------------------------------------------------------------------
     def read_blob(self, location: EventLocation, relative_path: str, max_bytes: int) -> bytes:
