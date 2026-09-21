@@ -7,7 +7,7 @@ from datetime import timedelta, timezone
 from pathlib import Path
 
 import pytest
-from conftest import csrf_from, db_rows
+from conftest import csrf_from, db_rows, serve_event
 
 from ledsync.services import registration as reg
 
@@ -19,11 +19,25 @@ PLUS3 = timezone(timedelta(hours=3))
 
 
 def upload(client, event_id, file_name="1000_valid.json", *, content=None, filename=None, csrf=True):
-    data = content if content is not None else (FILES / file_name).read_bytes()
-    form = {"event_id": event_id, "config_file": (io.BytesIO(data), filename or file_name)}
+    """Phase 4: 'upload' now means: put the file in (fake) Azure Storage where the web application
+    would keep it, then register the event by its ID. Same call shape as in Phase 3."""
+    azure = client.application.extensions["test.azure"]
+    raw = content if content is not None else (FILES / file_name).read_bytes()
+    try:
+        obj = json.loads(raw.decode("utf-8"))
+    except (ValueError, UnicodeDecodeError):
+        obj = None
+    if isinstance(obj, dict):
+        same = str(obj.get("eventId")) == event_id
+        folder = f"{event_id} - {obj.get('eventName') if same and isinstance(obj.get('eventName'), str) and obj['eventName'].strip() and len(obj['eventName']) < 60 else 'Test'}"
+        folder = "".join(ch for ch in folder if ch.isprintable() and ch not in "/\\")
+        serve_event(azure, obj, folder=folder)
+    else:
+        serve_event(azure, None, folder=f"{event_id} - Test", raw=raw)
+    form = {"event_id": event_id}
     if csrf:
         form["csrf_token"] = csrf_from(client, "/events/new")
-    return client.post("/events/new", data=form, content_type="multipart/form-data")
+    return client.post("/events/new", data=form)
 
 
 def events_rows(cfg):
@@ -47,12 +61,11 @@ def test_pages_require_login_and_the_launch_cookie(launched, client):
     assert client.post("/events/new").status_code == 403
 
 
-def test_the_add_form_is_branded_and_accessible(logged_in):
+def test_the_add_form_takes_only_an_event_id_and_is_accessible(logged_in):
     html = logged_in.get("/events/new").get_data(as_text=True)
     assert "Add New Event" in html and "REGISTER EVENT" in html
-    assert 'type="file"' in html and 'name="config_file"' in html and 'accept=".json' in html
-    assert 'enctype="multipart/form-data"' in html
-    assert 'for="event_id"' in html and 'for="config_file"' in html and 'name="csrf_token"' in html
+    assert 'type="file"' not in html and "multipart" not in html          # cloud only (owner decision)
+    assert 'for="event_id"' in html and 'name="csrf_token"' in html and "data-busy-text" in html
     assert "wtt-logo.png" in html
 
 
@@ -71,11 +84,11 @@ def test_valid_file_registers_the_event_and_shows_it_on_the_dashboard(app, cfg, 
     [row] = events_rows(cfg)
     assert (row["event_id"], row["event_name"], row["event_guid"], row["status"]) == (
         "1000", "Star contender Doha", GUID_1000, "Registered")
-    assert row["configuration_file"] == "Local test file: 1000_valid.json"
+    assert row["configuration_file"] == "https://sasportspresentation.blob.core.windows.net/2026/1000%20-%20Star%20contender%20Doha/_GUID.json"
     assert json.loads(row["configuration_json"])["eventId"] == "1000"
 
     html = dashboard(logged_in)
-    assert "Event 1000 (Star contender Doha) registered." in html
+    assert "Event 1000 (Star contender Doha) registered from Azure Storage." in html
     assert ">1000</td>" in html and "Star contender Doha" in html
     assert "18/09/26 10:02" in html                       # owner: Last Updated = export time, local zone
     assert 'badge-registered' in html and "1 registered" in html
@@ -111,7 +124,7 @@ def test_guid_mismatch_is_rejected_logged_and_redirects_to_reregistration(cfg, l
     assert events_rows(cfg)[0]["event_guid"] == GUID_1000                       # NOT changed
     [ex] = exception_rows(cfg)
     assert ex["category"] == "GUID validation" and ex["operation"] == "Register Event"
-    assert ex["event_id"] == "1000" and ex["source"] == "Local test file: 1000_reexported_new_guid.json"
+    assert ex["event_id"] == "1000" and ex["source"] == "https://sasportspresentation.blob.core.windows.net/2026/1000%20-%20Star%20contender%20Doha/_GUID.json"
     assert GUID_1000 in ex["message"] and NEW_GUID in ex["message"]
 
 
@@ -242,11 +255,6 @@ def test_a_bad_event_id_typo_is_explained_and_not_logged_as_an_exception(cfg, lo
     assert events_rows(cfg) == [] and exception_rows(cfg) == []
 
 
-def test_no_file_chosen_is_explained_and_not_logged(cfg, logged_in):
-    resp = logged_in.post("/events/new", data={"event_id": "1000", "csrf_token": csrf_from(logged_in, "/events/new")},
-                          content_type="multipart/form-data")
-    assert resp.status_code == 400 and "Choose the event" in resp.get_data(as_text=True)
-    assert events_rows(cfg) == [] and exception_rows(cfg) == []
 
 
 # --- security -------------------------------------------------------------------------------------------------
@@ -259,16 +267,8 @@ def test_every_post_needs_a_csrf_token(cfg, logged_in):
     assert events_rows(cfg)[0]["event_guid"] == GUID_1000
 
 
-def test_oversized_upload_gets_the_branded_413_and_registers_nothing(cfg, logged_in):
-    resp = upload(logged_in, "1000", content=b"x" * 200_000)
-    assert resp.status_code == 413 and "Request Too Large" in resp.get_data(as_text=True)
-    assert events_rows(cfg) == []
 
 
-def test_a_file_just_over_the_config_limit_is_rejected_with_a_message(cfg, logged_in):
-    resp = upload(logged_in, "1000", content=b" " * 100 + b"x" * (reg.MAX_CONFIG_BYTES) + b"y")
-    assert resp.status_code in (400, 413)
-    assert events_rows(cfg) == []
 
 
 def test_hostile_event_name_from_the_file_is_escaped_everywhere_it_is_shown(logged_in):
@@ -293,20 +293,8 @@ def test_file_contents_are_never_echoed_in_error_pages_or_the_exception_log(cfg,
     assert all(secret not in (e["message"] or "") for e in exception_rows(cfg))
 
 
-def test_client_supplied_file_name_is_sanitised_before_it_is_recorded(cfg, logged_in):
-    upload(logged_in, "1000", filename="..\\..\\Windows\\<evil>|name?.json")
-    [row] = events_rows(cfg)
-    src = row["configuration_file"]
-    assert src.startswith("Local test file: ") and "\\" not in src and "<" not in src and ".." not in src.replace("...", "")
-    assert len(src) <= 130
 
 
-def test_the_client_cannot_make_the_server_read_a_local_path(cfg, logged_in):
-    """Step 3.1 uses an uploaded file, never a path: a path-looking value is just a name."""
-    resp = logged_in.post("/events/new", data={
-        "event_id": "1000", "config_file": "C:\\Windows\\win.ini", "config_path": "C:\\Windows\\win.ini",
-        "csrf_token": csrf_from(logged_in, "/events/new")}, content_type="multipart/form-data")
-    assert resp.status_code == 400 and events_rows(cfg) == []
 
 
 def test_pending_reregistration_is_referenced_only_by_an_opaque_token_in_the_session(logged_in):
@@ -414,8 +402,7 @@ def test_error_pages_focus_the_message_and_do_not_autofocus_the_field(logged_in)
 
 def test_form_fields_are_linked_to_their_hints_and_to_the_error(logged_in):
     html = upload(logged_in, "../x").get_data(as_text=True)
-    assert 'aria-describedby="form-error event-id-hint"' in html and 'aria-describedby="form-error file-hint"' in html
-    assert 'id="event-id-hint"' in html and 'id="file-hint"' in html
+    assert 'aria-describedby="form-error event-id-hint"' in html and 'id="event-id-hint"' in html
 
 
 def test_the_login_page_still_autofocuses_username_after_a_failed_sign_in(launched):

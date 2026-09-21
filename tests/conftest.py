@@ -1,11 +1,41 @@
+import json
 import re
+from pathlib import Path
+from urllib.parse import quote
 
 import pytest
+from fakes import ACCOUNT, FAKE_KEY, FakeBlobService
 
+from ledsync import config as app_config
 from ledsync.config import Config
 from ledsync.db import connect, init_db
 from ledsync.services import auth
+from ledsync.services.storage import AzureReadOnlyStorage
 from ledsync.web import create_app
+
+def pytest_addoption(parser):
+    parser.addoption("--live", action="store_true", default=False,
+                     help="run the opt-in tests that talk to the REAL Azure Storage account (read-only)")
+
+
+def pytest_collection_modifyitems(config, items):
+    if config.getoption("--live"):
+        return
+    skip = pytest.mark.skip(reason="live Azure test - run with --live")
+    for item in items:
+        if "live" in item.keywords:
+            item.add_marker(skip)
+
+
+TESTFILES = Path(__file__).resolve().parent.parent / "docs" / "testfiles" / "phase3"
+
+
+@pytest.fixture(autouse=True)
+def hermetic_environment(monkeypatch, tmp_path_factory):
+    """No test may see a developer's real .env or Storage variables."""
+    monkeypatch.setattr(app_config, "DOTENV_PATH", tmp_path_factory.mktemp("noenv") / "no.env")
+    for name in ("STORAGE_ACCOUNT_NAME", "STORAGE_ACCOUNT_KEY", "STORAGE_CONTAINER"):
+        monkeypatch.delenv(name, raising=False)
 
 
 @pytest.fixture
@@ -14,14 +44,54 @@ def cfg(tmp_path) -> Config:
 
 
 @pytest.fixture
-def app(cfg):
+def azure(monkeypatch) -> FakeBlobService:
+    """The fake Azure blob service the application talks to in tests, with the cloud settings
+    supplied through the development-environment fallback (so no settings rows are written)."""
+    monkeypatch.setenv("STORAGE_ACCOUNT_NAME", ACCOUNT)
+    monkeypatch.setenv("STORAGE_ACCOUNT_KEY", FAKE_KEY)
+    monkeypatch.setenv("STORAGE_CONTAINER", "2026")
+    fake = FakeBlobService()
+    fake.containers.add("2026")
+    return fake
+
+
+@pytest.fixture
+def app(cfg, azure):
     init_db(cfg.db_path)
     conn = connect(cfg.db_path)
     auth.seed_admin(conn)
     conn.close()
     application = create_app(cfg)
     application.config["ALLOWED_HOSTS"] = frozenset({"localhost"})  # Flask test client's Host
+    application.extensions["ledsync.storage_factory"] = lambda settings: AzureReadOnlyStorage(
+        settings.account, settings.access_key, service_factory=azure.factory)
+    application.extensions["test.azure"] = azure
     return application
+
+
+def event_folder(event_id: str, name: str) -> str:
+    return f"{event_id} - {name}"
+
+
+def event_url(container: str, folder: str, account: str = ACCOUNT) -> str:
+    return f"https://{account}.blob.core.windows.net/{container}/{quote(folder)}"
+
+
+def serve_event(azure: FakeBlobService, file_or_obj, *, container="2026", folder=None, fix_url=True,
+                raw: bytes | None = None) -> str:
+    """Put an event's _GUID.json where the web application would (container/'<id> - <name>'/_GUID.json).
+    `file_or_obj` is a test-file name or a dict. The file's storage address is aligned to the folder
+    unless fix_url=False. Returns the folder used."""
+    if raw is not None:
+        azure.put(container, f"{folder}/_GUID.json", raw)
+        return folder
+    obj = (json.loads((TESTFILES / file_or_obj).read_text(encoding="utf-8"))
+           if isinstance(file_or_obj, str) else dict(file_or_obj))
+    folder = folder or event_folder(obj.get("eventId", "0"), obj.get("eventName", "x"))
+    if fix_url:
+        obj["eventStorageUrl"] = event_url(container, folder)
+    azure.put(container, f"{folder}/_GUID.json", json.dumps(obj))
+    return folder
 
 
 @pytest.fixture

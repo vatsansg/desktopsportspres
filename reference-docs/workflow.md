@@ -87,9 +87,28 @@ Status values: `Not started` / `In progress` / `Awaiting user go-ahead` / `Compl
   6. Browser password entry was again not performed; screens verified from rendered pages, and the owner's manual run in the real window is the true check.
 
 ## Phase 4 — Azure Storage Connectivity
-- **Status:** Not started
+- **Status:** Complete (owner's manual test passed and go-ahead given 21 September 2026; built, polished, independently reviewed and validated against live Azure the same day; merged to `main` and pushed — hashes in the table below)
 - **Includes:** first live connection to the (confirmed) Storage Account using the access key.
-- **Completed on:** / **What was built:** / **QA Test Case doc:** / **Security Checklist:** / **Deviations:**
+- **Completed on:** 21 September 2026
+- **What was built:**
+  - **Step 4.1 — Cloud Storage settings** (header link **Settings**): storage account, default year container and access key; saved to `application_settings`, reloaded after restart; the key is never shown again after saving (empty field, green **Saved** badge), never logged, never in an error, and reachable only through `services/settings.py` (pages get a key-less view). **Test Connection** only lists containers, uses a typed or saved key, saves nothing and says so. Event storage path is taken from each event's own `eventStorageUrl`; there is no Asset storage path setting (files are located from change-log relative paths) — both explained on the screen.
+  - **Step 4.2 — live registration:** Add New Event takes only the Event ID; the app finds `<EventID> - …` in the default year container then the other year containers (newest first), downloads `_GUID.json` (read-only, size-capped), validates it exactly as in Phase 3, **verifies the storage address inside the file equals the account/container/folder it came from (S-14)**, and registers. Re-registration works unchanged through Azure. The file picker is gone (cloud only).
+  - **Read-only Azure client:** `services/storage.py` lists and downloads only, with bounded timeouts/retry (an offline venue fails in ~2–15 s), errors mapped to BRD §21 categories with no SDK text; enforced by AST-based tests (no mutating/SAS/private-SDK/dynamic/other-HTTP-client code anywhere).
+  - **Event IDs are case-insensitive** (Azure lookup, registration, NOCASE unique index; leading zeros significant).
+  - **Development aids:** `.env`/environment fallback (development only; ignored by an installed build; validated), `scripts/set_storage_key.ps1` (masked entry, refuses unless git-ignored, ACL-restricted), opt-in `--live` tests.
+  - **Validated against the real account (read-only):** connect and list containers; find `1000 - Star contender Doha` from just `1000`; download and fully validate the real `_GUID.json` and its address; unknown event, wrong key and wrong account handled cleanly; **Event 1000 registered end to end through the real app code** with every field stored and no credential anywhere in the local database. 7 live tests pass.
+  - 649 automated tests pass (Phases 0–4; 231 new) plus 7 live.
+- **QA Test Case doc:** `docs/QA_Desktop_Phase4_AzureConnectivity.md` — 66 cases: all 66 pass (42 automated groups, 7 live, 1 rendered-page, 16 manual run by the owner: "All ok"); includes the step-by-step real-app guide (incl. hiding `.env` to prove the Settings screen).
+- **Security Checklist:** `docs/Security_Desktop_Phase4_AzureConnectivity.md`
+- **Independent architect review:** **Approved with notes**, no blockers; it tried to leak the key on every path and could not. Ten fix-now findings resolved: crash (HTTP 500) and looseness in address verification (`:abc` port; `?sig=`, `%2F`, fragments accepted), the Azure lookup ignoring the case rule, Test Connection silently not saving a typed key, the fallback not being development-only or validated, keys pasted into the wrong field being echoed (and one being saved as a container name), offline hang (~13–37 s → ~2 s), the evadable substring read-only test (now AST), bfcache leaving a form disabled, Azure SDK request logging, and a generic `read_blob`. Also done: key-less settings view, real `raise` instead of `assert`, fullmatch year containers, base64 key validation, proxy/sign-in-page and empty-blob handling, Flask-free storage factory. **Carried forward:** persist verified container/folder and blob properties (Phase 6–7); packaging certifi/cffi and proxy/TLS behaviour (Phase 13). The fixes were verified by 81 new tests and re-validated live, but did **not** get a second independent review pass.
+- **`ralph-loop` / `wtt-brand`:** run (1 of max 2 iterations; completion promise met). Change: the settings summary is no longer a box inside a box; orange still only on the single primary action per screen.
+- **Deviations:**
+  1. **Access key stored as PLAIN TEXT in the database — owner decision (21 Sep 2026), an explicit departure from BRD 33.3.** Recorded as an owner-approved accepted risk (Security B1/F2, QA F-28). Azure keys are full-power (they can write), so "read-only" is a rule the application keeps, not something the key enforces. Recommended before venue deployment: a read-only container-scoped credential and/or Windows encryption (single seam in `settings.py`).
+  2. **No editable "Event storage path" / "Asset storage path" settings** (BRD 14 lists them): the event path comes from each event's `eventStorageUrl`; assets are located from change-log relative paths (owner's reasoning, 21 Sep 2026).
+  3. **A `.env`/environment fallback supplies unsaved settings in development** (not in the BRD); a saved value always wins, and an installed build ignores it.
+  4. **New dependency** `azure-storage-blob` 12.30.2 (24 packages; no known vulnerabilities).
+  5. **Real cloud differs from the BRD (found during live validation; decisions needed at Phase 5/6):** change log is `_ledassetschangelog.csv` (with an "s"), not `_ledassetchangelog.csv`; cloud folders are lowercase (`Table 1/inner|outer|mainled`) while change-log entries use `Inner/Outer/MainLED` (contradicting Addendum A §39.1); `keepalive.txt` placeholders and a file with no extension exist in the folders.
+  6. Native-window keystroke automation is unreliable on this machine and a password was never typed into a browser; screens verified from rendered pages, and the owner's manual run is the true check.
 
 ## Phase 5 — LED Structure and Device Mapping
 - **Status:** Not started
@@ -142,7 +161,7 @@ Status values: `Not started` / `In progress` / `Awaiting user go-ahead` / `Compl
 | 1 | Complete | 21 Sep 2026 | `47e3461` (merge `47ca4f7`); logo follow-up `8ffc002` |
 | 2 | Complete | 21 Sep 2026 | `29e54c5` + `ac03ded` (merge `8d2c25e`) |
 | 3 | Complete | 21 Sep 2026 | `8cb2c81` + `1369bac` (merge `6405679`) |
-| 4 | Not started | | |
+| 4 | Complete | 21 Sep 2026 | `cdc9aa8` + `35bb338` (merge pending) |
 | 5 | Not started | | |
 | 6 | Not started | | |
 | 7 | Not started | | |

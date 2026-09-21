@@ -1,0 +1,67 @@
+{% extends "base.html" %}
+{% from "_password_field.html" import password_field %}
+{% block title %}Cloud Storage Settings — {{ app_name }}{% endblock %}
+{% block body %}
+{% include "_topbar.html" %}
+<main class="page page-medium">
+  {% for category, message in get_flashed_messages(with_categories=true) %}
+  <p class="alert alert-{{ category }}" role="status">{{ message }}</p>
+  {% endfor %}
+  <h1>Settings</h1>
+  <h2 class="settings-section">Cloud Storage</h2>
+  <p class="lede">The Azure Storage account the web application uploads to. This application only ever <strong>reads</strong> from it.</p>
+
+  {% if notice %}
+  <p id="form-notice" data-focus-alert class="alert alert-success" role="status">{{ notice }}</p>
+  {% endif %}
+  {% if error %}
+  <p id="form-error" data-focus-alert class="alert alert-error" role="alert">{{ error }}</p>
+  {% endif %}
+
+  <form method="post" action="{{ url_for('settings.cloud_post') }}" class="panel" novalidate
+        data-busy-text="WORKING…">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+
+    <div class="field">
+      <label for="account">Storage account</label>
+      <input id="account" name="account" type="text" value="{{ account }}" maxlength="24" autocomplete="off"
+             spellcheck="false" required {% if not error and not notice %}autofocus{% endif %}
+             aria-describedby="{% if error %}form-error {% endif %}account-hint">
+      <p id="account-hint" class="hint">The account name only, for example <span class="mono">sasportspresentation</span>.
+        {% if saved.account_source %}<strong>Currently supplied by {{ saved.account_source }}.</strong>{% endif %}</p>
+    </div>
+
+    <div class="field">
+      <label for="container">Storage container</label>
+      <input id="container" name="container" type="text" value="{{ container }}" maxlength="63" autocomplete="off"
+             spellcheck="false" aria-describedby="container-hint">
+      <p id="container-hint" class="hint">The default year container to look in, for example <span class="mono">2026</span>.
+        Events stored in other year containers are found automatically.</p>
+    </div>
+
+    {{ password_field("access_key", "access_key", "Storage account access key", autocomplete="off",
+                      hint=("Saved. Leave blank to keep it; type a new key to replace it. The key is never shown again."
+                            if saved.has_key and not saved.key_from_dev_env else
+                            ("Currently supplied by " ~ saved.key_source ~ ". Type a key here to save your own."
+                             if saved.key_from_dev_env else "Not set yet. Paste the account access key from the Azure portal.")),
+                      describedby=("form-error" if error else None)) }}
+
+    <dl class="kv">
+      <dt>Access key</dt>
+      <dd>{% if saved.key_source %}From {{ saved.key_source }} (not saved in Settings)
+          {% elif saved.has_key %}<span class="badge badge-synced">Saved</span>
+          {% else %}<span class="badge badge-attention">Not set</span>{% endif %}</dd>
+      <dt>Event storage path</dt>
+      <dd>Taken from each event's own configuration (its <span class="mono">eventStorageUrl</span>) &mdash; nothing to set here.</dd>
+      <dt>Asset storage path</dt>
+      <dd>Not needed: files are located by the folder paths in each event's change log.</dd>
+    </dl>
+
+    <div class="form-actions">
+      <button type="submit" name="action" value="save" class="btn btn-primary">SAVE SETTINGS</button>
+      <button type="submit" name="action" value="test" class="btn btn-secondary">Test Connection</button>
+      <a class="btn btn-secondary" href="{{ url_for('views.dashboard') }}">Back to Dashboard</a>
+    </div>
+  </form>
+</main>
+{% endblock %}

@@ -224,11 +224,12 @@ def parse_event_config(data: bytes) -> EventConfig:
     try:
         parts = urlsplit(storage_url)
         host_ok = bool(parts.hostname) and parts.scheme == "https" and parts.username is None \
-            and parts.password is None
+            and parts.password is None and not parts.query and not parts.fragment
+        parts.port                                          # raises ValueError for a malformed port
     except ValueError:
         host_ok = False
     if not host_ok:
-        raise _invalid("The field 'eventStorageUrl' must be an https address.")
+        raise _invalid("The field 'eventStorageUrl' must be a plain https address (no query or fragment).")
 
     guid = normalise_guid(obj.get("exportGuid"))
     if guid is None:
@@ -268,7 +269,8 @@ def parse_event_config(data: bytes) -> EventConfig:
 # --- registration ---------------------------------------------------------------
 
 def _ensure_identity(entered_event_id: str, config: EventConfig) -> None:
-    if config.event_id != entered_event_id:
+    # Event IDs are case-insensitive (Windows folders are): 'abc' and 'ABC' are the same event.
+    if config.event_id.casefold() != entered_event_id.casefold():
         raise RegistrationError(
             exceptions.CONFIGURATION,
             f"The file is for event {config.event_id}, but you entered event {entered_event_id}. "
@@ -291,11 +293,13 @@ def register_event(conn: sqlite3.Connection, entered_event_id: str, config: Even
     """Register a new event. Returns 'registered', or 'already_registered' when the event
     exists with the SAME GUID. Raises GuidMismatch for a different GUID."""
     _ensure_identity(entered_event_id, config)
-    row = conn.execute("SELECT event_guid FROM events WHERE event_id = ?", (entered_event_id,)).fetchone()
+    row = conn.execute("SELECT event_id, event_guid FROM events WHERE event_id = ? COLLATE NOCASE",
+                       (entered_event_id,)).fetchone()
     if row is not None:
         if validate_guid(row["event_guid"], config.guid):
             return "already_registered"
-        raise GuidMismatch(entered_event_id, normalise_guid(row["event_guid"]), config.guid)
+        # Carry the spelling already on record, so re-registration updates that very row.
+        raise GuidMismatch(row["event_id"], normalise_guid(row["event_guid"]), config.guid)
 
     _ensure_guid_not_used_elsewhere(conn, entered_event_id, config.guid)
     try:

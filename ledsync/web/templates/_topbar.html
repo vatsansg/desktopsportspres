@@ -5,6 +5,7 @@
   </div>
   <nav class="topbar-actions" aria-label="Account">
     <span class="topbar-user">Signed in as <strong>{{ username }}</strong></span>
+    <a class="btn btn-secondary" href="{{ url_for('settings.cloud') }}">Settings</a>
     <a class="btn btn-secondary" href="{{ url_for('views.change_password') }}">Change Password</a>
     <form method="post" action="{{ url_for('views.logout') }}" class="inline-form">
       <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">

@@ -177,9 +177,22 @@ def test_credential_only_touched_by_auth_module():
     assert offenders == []
 
 
-def test_only_auth_module_reads_admin_rows_from_application_settings():
+def test_only_the_two_settings_modules_touch_application_settings():
+    """Two owners, each confined to its own keys: services/auth.py (the admin credential) and
+    services/settings.py (cloud storage settings + the Azure key). Nothing else may read it."""
     root = Path(__file__).resolve().parent.parent / "ledsync"
-    users = [str(p.relative_to(root)) for p in root.rglob("*.py")
-             if "application_settings" in p.read_text(encoding="utf-8")
-             and p.name not in ("auth.py", "schema.py")]
-    assert users == []  # until Phase 4/10 add other settings modules deliberately
+    users = sorted(str(p.relative_to(root)).replace("\\", "/") for p in root.rglob("*.py")
+                   if "application_settings" in p.read_text(encoding="utf-8")
+                   and p.name not in ("schema.py",))
+    assert users == ["services/auth.py", "services/settings.py"]
+
+
+def test_the_two_settings_owners_never_reference_each_others_keys():
+    root = Path(__file__).resolve().parent.parent / "ledsync" / "services"
+    auth_src = (root / "auth.py").read_text(encoding="utf-8")
+    settings_src = (root / "settings.py").read_text(encoding="utf-8")
+    # settings.py must not be able to read the admin credential (no admin key names/constants) ...
+    assert not re.search(r"admin_password|admin_username|Admin@123|KEY_PASSWORD|KEY_USERNAME", settings_src.replace("`admin_*`", ""))
+    # ... and auth.py must not touch the Azure key or cloud settings.
+    assert not re.search(r"cloud_|KEY_ACCESS|KEY_ACCOUNT|KEY_CONTAINER|access_key", auth_src)
+    assert 'raise PermissionError("settings.py may only touch its own keys")' in settings_src   # a real raise: survives python -O
