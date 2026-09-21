@@ -60,7 +60,7 @@ Live checks (read-only, re-runnable): `.\.venv\Scripts\python -m pytest -q --liv
 
 | Total cases | Passed | Failed | Blocked | Not yet run |
 |---|---|---|---|---|
-| 35 | 20 (8 automated groups covering about 130 new pytest cases, 4 live checks against real Azure, 1 rendered-page group — all run by Claude) | 0 | 0 | 15 (manual TC-M01 – TC-M15, for the owner) |
+| 35 | 35 (8 automated groups covering about 130 new pytest cases, 4 live checks against real Azure, 1 rendered-page group — all run by Claude; 15 manual TC-M01 – TC-M15 run by the owner on 21/09/26: "All good") | 0 | 0 | 0 |
 
 `.\.venv\Scripts\python -m pytest -q` → **1314 passed, 12 skipped** (the skipped are the live-Azure tests, which need `--live`); `--live` → **all live tests pass** against real Azure (read-only); the full 630 MB run needs `$env:LEDSYNC_LIVE_FULL = "1"`.
 
@@ -114,4 +114,4 @@ Live checks (read-only, re-runnable): `.\.venv\Scripts\python -m pytest -q --liv
 | Role | Name | Date | Outcome |
 |---|---|---|---|
 | Independent Solution Architect review | Independent review agent (fresh context) | 21/09/26 | **Approved with notes** — no blockers. Five "fix now" findings reproduced and fixed: Azure-only files in a `Main LED` folder were offered but could never be downloaded; a cloud removal followed a **junction** at Table/LED level and deleted a file outside the asset tree; stale temporary files in sub-folders were never swept; a finished job's **summary could be lost** in a race; a file missing from disk and from Azure kept the run "waiting" forever. Worthwhile notes also done: the retry re-lists (no stale cache), a **file replaced in Azure during a download is detected** (version pinning), Azure 429/5xx stop the run, a stop/cancel skips the slow tidy-up and counts every file not tried, folder settings compared by real location, over-long paths and FIPS-mode checksums handled, accessibility of the progress panel, structured message severity. 34 new tests; **not re-reviewed**. |
-| User (Vatsan) go-ahead | Vatsan | | *pending manual test* |
+| User (Vatsan) go-ahead | Vatsan | 21/09/26 | Approved — "All good, complete work in current step, commit and then move to next step" |
