@@ -22,6 +22,22 @@ def _now() -> str:
     return datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
 
 
+def add(
+    conn: sqlite3.Connection,
+    operation: str,
+    status: str,
+    message: str = "",
+    event_id: str | None = None,
+) -> None:
+    """Insert a row WITHOUT committing and WITHOUT swallowing errors, so a state-changing
+    operation can write its data and its audit row in ONE transaction (both or neither)."""
+    conn.execute(
+        "INSERT INTO operation_log (event_id, operation, timestamp, status, message) "
+        "VALUES (?, ?, ?, ?, ?)",
+        (event_id, operation, _now(), status, message),
+    )
+
+
 def record(
     conn: sqlite3.Connection,
     operation: str,
@@ -30,11 +46,7 @@ def record(
     event_id: str | None = None,
 ) -> None:
     try:
-        conn.execute(
-            "INSERT INTO operation_log (event_id, operation, timestamp, status, message) "
-            "VALUES (?, ?, ?, ?, ?)",
-            (event_id, operation, _now(), status, message),
-        )
+        add(conn, operation, status, message, event_id)
         conn.commit()
     except sqlite3.Error:
         log.exception("Could not write operation_log row (%s / %s)", operation, status)

@@ -1,0 +1,23 @@
+{
+  "eventId": "1000",
+  "eventName": "Star contender Doha",
+  "eventStorageUrl": "https://sasportspresentation.blob.core.windows.net/2026/1000%20-%20Star%20contender%20Doha",
+  "tables": [
+    {
+      "tableNumber": 1,
+      "innerLed": true,
+      "outerLed": true,
+      "mainLed": true
+    },
+    {
+      "tableNumber": 2,
+      "innerLed": true,
+      "outerLed": false,
+      "mainLed": false
+    }
+  ],
+  "exportedByUsername": "vatsan@worldtabletennis.com",
+  "exportedByRole": "Administrator",
+  "exportTimestamp": "2026-09-21T09:30:00.000Z",
+  "exportGuid": "7c9e6679-7425-40de-944b-e07fc1f90ae7"
+}

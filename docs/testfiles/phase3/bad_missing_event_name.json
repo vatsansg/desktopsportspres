@@ -1,0 +1,28 @@
+{
+  "eventId": "3001",
+  "eventStorageUrl": "https://sasportspresentation.blob.core.windows.net/2026/2000%20-%20Second%20Test%20Event",
+  "tables": [
+    {
+      "tableNumber": 1,
+      "innerLed": true,
+      "outerLed": true,
+      "mainLed": false
+    },
+    {
+      "tableNumber": 2,
+      "innerLed": true,
+      "outerLed": false,
+      "mainLed": true
+    },
+    {
+      "tableNumber": 3,
+      "innerLed": false,
+      "outerLed": false,
+      "mainLed": true
+    }
+  ],
+  "exportedByUsername": "test.admin@example.com",
+  "exportedByRole": "Administrator",
+  "exportTimestamp": "2026-09-20T15:45:10.120Z",
+  "exportGuid": "0b8f5c2a-91d3-4e6f-8a17-3c5d7e9f1a2b"
+}
