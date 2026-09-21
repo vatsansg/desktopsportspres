@@ -8,6 +8,10 @@
   {% endfor %}
   <h1>Dashboard</h1>
 
+  {% for item in summaries %}{% for line in item.lines %}
+  <p class="alert alert-{{ line.level }}" role="{{ 'alert' if line.level == 'error' else 'status' }}">{% if loop.first %}Event {{ item.event_id }}: {% endif %}{{ line.text }}</p>
+  {% endfor %}{% endfor %}
+
   <section aria-labelledby="events-heading">
     <div class="section-head">
       <h2 id="events-heading">Events</h2>
@@ -25,6 +29,7 @@
             <th scope="col">Event Name</th>
             <th scope="col">Last Updated</th>
             <th scope="col">Status</th>
+            <th scope="col">Actions</th>
           </tr>
         </thead>
         <tbody>
@@ -34,6 +39,12 @@
             <td><a class="row-link" href="{{ url_for('devices.details', event_id=e.event_id) }}">{{ e.event_name }}</a></td>
             <td class="nowrap">{{ e.last_updated }}</td>
             <td><span class="badge badge-{{ e.status_key }}">{{ e.status }}</span></td>
+            <td class="nowrap">
+              <form method="post" action="{{ url_for('sync.start', event_id=e.event_id) }}" class="inline-form" novalidate data-busy-text="STARTING…">
+                <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+                <button type="submit" class="btn btn-secondary btn-sm" data-busy-label="Starting…" aria-label="Download and sync event {{ e.event_id }}">Download &amp; Sync</button>
+              </form>
+            </td>
           </tr>
           {% endfor %}
         </tbody>
@@ -47,5 +58,27 @@
     </div>
     {% endif %}
   </section>
+
+  <section aria-labelledby="ops-heading" class="block" id="operations" data-url="{{ url_for('sync.operations') }}" data-active="{{ 1 if operations else 0 }}">
+    <h2 id="ops-heading">Operation Status</h2>
+    {% if operations %}
+    {% for op in operations %}
+    <div class="panel op" data-event="{{ op.event_id }}" role="status" aria-live="polite">
+      <p><strong>Event {{ op.event_id }}</strong> &middot; <span class="op-phase">{{ op.phase or "Working" }}</span></p>
+      <p class="op-text">Working…</p>
+      <p class="op-counts hint">Identified {{ op.identified }} &middot; Downloaded {{ op.downloaded }} &middot; Synchronised {{ op.synchronised }} &middot; Errors {{ op.errors }}</p>
+      <progress class="op-bar" max="100" value="{{ op.percent }}" aria-label="Progress of the current file">{{ op.percent }}%</progress>
+      <form method="post" action="{{ url_for('sync.cancel', event_id=op.event_id) }}" novalidate>
+        <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+        <div class="form-actions"><button type="submit" class="btn btn-secondary btn-sm">Cancel</button></div>
+      </form>
+    </div>
+    {% endfor %}
+    <noscript><p class="hint">Progress is not shown without JavaScript. Reload this page to see whether the run has finished.</p></noscript>
+    {% else %}
+    <p class="panel">No operation is running. Use <strong>Download &amp; Sync</strong> on an event to fetch new files and send them to the LED devices.</p>
+    {% endif %}
+  </section>
+  <script src="{{ url_for('static', filename='js/dashboard.js') }}" defer></script>
 </main>
 {% endblock %}

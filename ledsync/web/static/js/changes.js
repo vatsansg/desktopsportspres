@@ -11,7 +11,8 @@
       .then(function (s) {
         if (s.state !== "running") { window.location.reload(); return; }
         var n = Math.min(s.done + 1, s.total);
-        var line = "Downloading file " + n + " of " + s.total + (s.current ? ": " + s.current : "") +
+        var verb = s.phase === "Synchronising" ? "Sending" : "Downloading";
+        var line = verb + " file " + n + " of " + s.total + (s.current ? ": " + s.current : "") +
           (s.percent ? " (" + (Math.floor(s.percent / 10) * 10) + "%)" : "") + (s.cancelling ? " \u2014 cancelling\u2026" : "");
         if (line !== last) {                       // announce only real changes (10% steps, next file, cancelling)
           text.textContent = line;

@@ -9,7 +9,7 @@ registration or the local history changes.
 from flask import Blueprint, current_app, flash, jsonify, redirect, render_template, session, url_for
 
 from .. import APP_NAME, __version__
-from ..services import assets, changes, downloads, localfiles, rpi, settings as cloud_settings
+from ..services import assets, changes, downloads, localfiles, rpi, settings as cloud_settings, sync
 from ..services import events as event_service
 from ..services import structure
 from .app_db import get_db
@@ -74,6 +74,11 @@ def page(event_id):
     ctx = dict(app_name=APP_NAME, version=__version__, username=session.get("user"), event=row, report=None,
                running=bool(job and job.progress.state == "running"), job_summary=_jobs().take_summary(row["event_id"]),
                waiting_total=0)
+    try:
+        sync_items, sync_unmapped = sync.plan(get_db(), row["event_id"], None)          # database only
+    except Exception:                                                                    # noqa: BLE001 - never break the page
+        sync_items, sync_unmapped = [], []
+    ctx.update(sync_waiting=len(sync_items), sync_unmapped=sync_unmapped)
     ctx["rpi_folder"] = cloud_settings.load_rpi_folder(get_db(), data_dir)
     ctx["asset_folder"] = cloud_settings.load_asset_folder(get_db(), data_dir)
     if report is not None:

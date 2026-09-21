@@ -47,6 +47,14 @@ class LocalFileError(Exception):
     """A file could not be written or removed; the message is plain text that is safe to show."""
 
 
+class DeviceError(LocalFileError):
+    """A device (shared) folder could not be used. `category` is the BRD Section 21 category for the exception log."""
+
+    def __init__(self, category: str, message: str):
+        super().__init__(message)
+        self.category = category
+
+
 class IntegrityError(LocalFileError):
     """The downloaded bytes are not what Azure listed (wrong size or checksum); the file was discarded."""
 
@@ -349,3 +357,96 @@ def missing_files(folder: Path, names, timeout: float = 5.0) -> set | None:
         return run_limited(look, timeout)
     except LocalFileError:
         return None
+
+
+# --- pushing a file to a LED device's shared folder ---------------------------------------------------------------------
+
+def check_destination(folder, data_dir) -> Path:
+    """The device folder must exist, be a plain folder, and not be (or alias) the application's data folder, a folder
+    containing it, a drive root or an operating-system folder - judged by file identity. It is NEVER created here."""
+    def check():
+        path = Path(folder)
+        if not path.is_dir():
+            raise DeviceError("Missing folder", "The device folder does not exist or is not available.")
+        if _unsafe_root(path, Path(os.path.realpath(path)), data_dir):
+            raise DeviceError("Configuration", "That device folder is reserved for the operating system or this application.")
+        return path
+    return run_limited(check, FOLDER_TIMEOUT)
+
+
+def _device_error(err: OSError, doing: str) -> DeviceError:
+    from . import connectivity
+    result = connectivity._classify(err, doing)
+    return DeviceError(result.category or "File access", result.message)
+
+
+def push_file(source, dest_dir, name: str, *, on_bytes=None, cancelled=None) -> Path:
+    """Copy `source` (a file in the local asset folder) into the device folder as `name`.
+
+    The copy is built under a hidden temporary name on the device, flushed, then READ BACK and compared with the source
+    (size and MD5) BEFORE it is renamed into place, so the LED software never sees a half or corrupt file and a wrong copy
+    is never left. An existing file of that name is replaced (owner decision). The device folder is never created."""
+    source, dest_dir = Path(source), Path(dest_dir)
+    target = _target(dest_dir, name)
+    try:
+        if not source.is_file() or _is_link(source):
+            raise IntegrityError("The downloaded file is missing from this computer, so it could not be sent.")
+        size = source.stat().st_size
+    except OSError:
+        raise IntegrityError("The downloaded file could not be read on this computer, so it could not be sent.") from None
+    temp = dest_dir / f".{uuid.uuid4().hex}{TEMP_SUFFIX}"
+    try:
+        if os.path.lexists(target) and (target.is_dir() or _is_link(target)):
+            raise LocalFileError("A folder or link on the device already has that name, so the file was not sent.")
+        try:
+            free = run_limited(lambda: shutil.disk_usage(dest_dir).free, 10.0)
+        except (OSError, LocalFileError):
+            free = None
+        if free is not None and free < size + 16 * 1024 * 1024:
+            raise DeviceError("File access", "There is not enough free space on the device folder for this file.")
+        source_md5, copied = hashlib.md5(usedforsecurity=False), 0
+        with open(source, "rb") as reading, open(temp, "xb") as writing:
+            while True:
+                if cancelled is not None and cancelled():
+                    raise Cancelled()
+                chunk = reading.read(4 * 1024 * 1024)
+                if not chunk:
+                    break
+                writing.write(chunk)
+                source_md5.update(chunk)
+                copied += len(chunk)
+                if on_bytes is not None:
+                    on_bytes(len(chunk))
+            writing.flush()
+            try:
+                os.fsync(writing.fileno())
+            except OSError:
+                pass                                                  # some shares cannot flush; the read-back below decides
+        if copied != size:
+            raise IntegrityError("The file changed on this computer while it was being sent, so it was discarded.")
+        # Verify the copy on the device: size and MD5, read back, BEFORE it takes its real name.
+        if temp.stat().st_size != size:
+            raise IntegrityError("The copy on the device is not the right size, so it was discarded.")
+        back = hashlib.md5(usedforsecurity=False)
+        with open(temp, "rb") as check:
+            while True:
+                if cancelled is not None and cancelled():
+                    raise Cancelled()
+                chunk = check.read(4 * 1024 * 1024)
+                if not chunk:
+                    break
+                back.update(chunk)
+        if back.digest() != source_md5.digest():
+            raise IntegrityError("The copy on the device did not match the original (checksum), so it was discarded.")
+        run_limited(lambda: os.replace(temp, target), 30.0)
+    except (LocalFileError, Cancelled):
+        _quiet_remove(temp)
+        raise
+    except PermissionError:
+        _quiet_remove(temp)
+        raise DeviceError("Permission", "The file on the device could not be replaced. It may be read-only or in use, or this "
+                                        "Windows account may not be allowed to write there.") from None
+    except OSError as err:
+        _quiet_remove(temp)
+        raise _device_error(err, "sending the file") from None
+    return target

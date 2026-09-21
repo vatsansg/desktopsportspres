@@ -6,7 +6,7 @@ import sqlite3
 from flask import Blueprint, abort, current_app, flash, redirect, render_template, request, session, url_for
 
 from .. import APP_NAME, __version__
-from ..services import connectivity, events as event_service, mappings, registration as reg, structure
+from ..services import connectivity, eventstatus, events as event_service, mappings, registration as reg, structure
 from .app_db import get_db
 from .security import login_required
 
@@ -115,6 +115,7 @@ def save_or_test(event_id):
     except mappings.MappingError as err:
         return _render(row, struct, 400, posted=request.form, error=str(err))
 
+    eventstatus.refresh(db, row["event_id"])
     if action == "save":
         flash("Device mapping saved." if changed else "Nothing changed — the mapping was already saved.",
               "success" if changed else "info")
@@ -163,6 +164,7 @@ def _run_tests(row, action):
                 flash(f"{m.label}: {result.warning}", "info")
         else:
             flash(f"{m.label}: Connection Failed — {result.message}", "error")
+    eventstatus.refresh(db, row["event_id"])
     total = len(targets)
     summary = (f"{ok_count} of {total} destination{'s' if total != 1 else ''} passed: Connection Successful."
                if ok_count == total else f"{ok_count} of {total} destination{'s' if total != 1 else ''} passed.")

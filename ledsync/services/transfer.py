@@ -116,6 +116,7 @@ def run(conn: sqlite3.Connection, storage, account: str, location, event_id: str
                 history(conn, event_id, item, table, led, location.blob_url(account, info.path), str(target), "Success")
                 oplog.add(conn, operation, "Success", f"Downloaded {item.file_name}.", event_id)
                 result.downloaded += 1
+                progress.tally_downloaded()
             else:
                 folder = existing_folder_for(item)
                 if folder is not None:
@@ -146,6 +147,7 @@ def run(conn: sqlite3.Connection, storage, account: str, location, event_id: str
                 except sqlite3.Error:
                     conn.rollback()
             _fail(conn, result, event_id, item, table, led, err, operation)
+            progress.tally_error()
             if isinstance(err, StorageError) and err.category in STOP_CATEGORIES:
                 result.stopped = True
                 result.remaining = len(items) - index - 1
@@ -155,6 +157,7 @@ def run(conn: sqlite3.Connection, storage, account: str, location, event_id: str
             conn.rollback()
             log.exception("Could not record a downloaded file")
             result.failed += 1
+            progress.tally_error()
             result.failures.append(f"{item.file_name}: the result could not be saved.")
         progress.finish_file(ok)
     if result.downloaded:

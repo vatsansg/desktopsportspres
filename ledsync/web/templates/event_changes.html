@@ -45,6 +45,23 @@
     </form>
   </section>
 
+  <section aria-labelledby="sync-heading" class="block">
+    <h2 id="sync-heading">Sync To LED Devices</h2>
+    <p class="hint">Downloaded files are copied to the shared folder mapped for each table and LED type (see
+      <a href="{{ url_for('devices.details', event_id=event.event_id) }}">Device Mapping</a>). Each copy is read back and compared with the
+      original before it takes its name on the device. Files this application put on a device are removed when the cloud removes them; nothing
+      else on a device is touched.</p>
+    {% if sync_waiting %}
+    <form method="post" action="{{ url_for('sync.push_only', event_id=event.event_id) }}" novalidate data-busy-text="STARTING…">
+      <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+      <div class="form-actions"><button type="submit" class="btn btn-secondary" data-busy-label="Starting…">Sync To LED Devices ({{ sync_waiting }})</button></div>
+    </form>
+    {% else %}
+    <p class="panel">Nothing is waiting to be sent to the LED devices.</p>
+    {% endif %}
+    {% if sync_unmapped %}<p class="alert alert-info" role="status">No device folder is set for: {{ sync_unmapped|join(", ") }}. Set it on the Device Mapping page.</p>{% endif %}
+  </section>
+
   {% if not report %}
   <p class="panel">No check has been run yet in this session. Press <strong>CHECK FOR CHANGES</strong> to read the change log.</p>
   {% else %}

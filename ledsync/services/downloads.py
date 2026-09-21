@@ -1,9 +1,11 @@
-"""Running a download (RPI files and Table / LED files) in the background, with progress and Cancel.
+"""Running Download and / or Sync (RPI files, Table / LED files, and pushing to the LED devices) in the background, with
+progress and Cancel.
 
-A download can take minutes (large videos), so it never runs inside a web request: the page starts a job on a worker
-thread and polls its progress. The job always begins with a FRESH check of Azure (it never trusts an earlier result),
-then downloads the RPI files and the Table / LED files, refreshes `_localchangelog.csv`, and stores a new result for the
-page. It uses its own database connection. Only one job runs per event at a time.
+A run can take minutes (large videos, several devices), so it never runs inside a web request: the page starts a job on a
+worker thread and polls its progress. A download always begins with a FRESH check of Azure (it never trusts an earlier
+result), then downloads the RPI files and the Table / LED files; a sync then pushes what was downloaded to the mapped LED
+folders (it needs no Azure at all when only synchronising). Afterwards `_localchangelog.csv` and the event status are
+refreshed. The job uses its own database connection. Only one job runs per event at a time.
 
 The summary of a finished job is stored BEFORE the job's state changes to finished, so a page that sees "finished" always
 finds its summary.
@@ -14,7 +16,7 @@ import threading
 from dataclasses import dataclass, field
 
 from ..db import connect
-from . import assets, changes, localchangelog, localfiles, rpi
+from . import assets, changes, eventstatus, localchangelog, localfiles, rpi, sync
 from . import settings as cloud_settings
 from .progress import Progress
 from .storage import EventLocation
@@ -31,6 +33,7 @@ def _line(level: str, text: str) -> dict:
 class Job:
     event_id: str
     progress: Progress
+    kind: str = "download"                                # download | sync | both
     thread: threading.Thread | None = None
     summary: list[dict] = field(default_factory=list)     # {level, text}; shown once when the job has finished
     seen: bool = False
@@ -55,7 +58,7 @@ class JobRegistry:
         job = self.get(event_id)
         return bool(job and job.progress.state == "running")
 
-    def start(self, event_id: str, work, inline: bool = False) -> Job | None:
+    def start(self, event_id: str, work, inline: bool = False, kind: str = "download") -> Job | None:
         """Start `work(progress) -> list[dict]`. Returns None if a job for this event is already running."""
         with self._lock:
             existing = self._jobs.get(self._key(event_id))
@@ -63,15 +66,15 @@ class JobRegistry:
                 return None
             progress = Progress()
             progress.state = "running"
-            job = Job(event_id, progress)
+            job = Job(event_id, progress, kind)
             self._jobs[self._key(event_id)] = job
 
         def target():
             try:
                 job.summary = work(progress)
             except Exception:                                    # noqa: BLE001 - a job must always end in a state
-                log.exception("The download job failed")
-                job.summary = [_line("error", "The download stopped because of an unexpected problem.")]
+                log.exception("The job failed")
+                job.summary = [_line("error", "The run stopped because of an unexpected problem.")]
                 progress.final_state = "error"
             # The summary is in place BEFORE the state says "finished".
             progress.end(progress.final_state, job.summary[0]["text"] if job.summary else "")
@@ -79,7 +82,7 @@ class JobRegistry:
         if inline:
             target()
         else:
-            job.thread = threading.Thread(target=target, name=f"download-{event_id}", daemon=True)
+            job.thread = threading.Thread(target=target, name=f"{kind}-{event_id}", daemon=True)
             job.thread.start()
         return job
 
@@ -92,8 +95,23 @@ class JobRegistry:
             job.seen = True
             return list(job.summary)
 
+    def running_snapshots(self) -> list[dict]:
+        """The progress of every running job, for the dashboard's Operation Status."""
+        with self._lock:
+            jobs = list(self._jobs.values())
+        return [dict(job.progress.snapshot(), event_id=job.event_id, kind=job.kind)
+                for job in jobs if job.progress.state == "running"]
 
-def _describe(result: TransferResult) -> list[dict]:
+    def take_all_summaries(self) -> list[dict]:
+        """Summaries of every finished job not yet shown: [{event_id, lines}]."""
+        with self._lock:
+            jobs = [job for job in self._jobs.values() if not job.seen and job.progress.state not in ("idle", "running")]
+            for job in jobs:
+                job.seen = True
+            return [{"event_id": job.event_id, "lines": list(job.summary)} for job in jobs]
+
+
+def _describe_download(result: TransferResult) -> list[dict]:
     if result.failed or result.stopped:
         head = "error"
     elif result.cancelled or result.remaining:
@@ -117,49 +135,108 @@ def _describe(result: TransferResult) -> list[dict]:
     return lines
 
 
-def run_download(config, storage_factory, settings, event_id: str, progress: Progress, tz=None, on_report=None) -> list[dict]:
+# kept under its Phase 7 name for callers that only download
+_describe = _describe_download
+
+
+def _describe_sync(result: sync.SyncResult) -> list[dict]:
+    head = "error" if result.failed else ("info" if result.cancelled or result.remaining else "success")
+    lines = [_line(head, f"Synchronised {result.pushed} file(s) to the LED devices, removed {result.removed}, "
+                         f"failed {result.failed}.")]
+    if result.unreachable:
+        lines.append(_line("error", "Could not use the device folder for: " + ", ".join(result.unreachable) + "."))
+    lines += [_line("error", text) for text in result.failures[:10]]
+    if len(result.failures) > 10:
+        lines.append(_line("error", f"…and {len(result.failures) - 10} more problems (see the exception log)."))
+    if result.unmapped:
+        lines.append(_line("info", "No device folder is set for: " + ", ".join(result.unmapped) +
+                           ". Set it on the event's Device Mapping page."))
+    if result.cancelled:
+        lines.append(_line("info", f"Cancelled; {result.remaining} file(s) were not sent. Nothing half-written was left on a device."))
+    elif result.remaining:
+        lines.append(_line("info", f"{result.remaining} more file(s) are waiting. Synchronise again to continue."))
+    return lines
+
+
+def run_job(config, storage_factory, settings, event_id: str, progress: Progress, tz=None, on_report=None, *,
+            download: bool = True, push: bool = True, checker=None) -> list[dict]:
     """The whole job (blocking). Returns the summary lines and sets `progress.final_state`; the registry ends the job."""
     conn = connect(config.db_path)
     try:
-        storage = storage_factory(settings)
-        try:
-            report = changes.check_event(conn, storage, settings, event_id)          # always from a fresh read
-        except changes.CheckError as err:
+        progress.phase = "Checking"
+        canonical = conn.execute("SELECT event_id FROM events WHERE event_id = ? COLLATE NOCASE", (event_id,)).fetchone()
+        if canonical is None:
             progress.final_state = "error"
-            return [_line("error", err.message)]
-        event_id = report.event_id
-        location = EventLocation(report.container, report.folder)
-        rpi_folder = cloud_settings.load_rpi_folder(conn, config.data_dir).effective
+            return [_line("error", "That event is not registered.")]
+        event_id = canonical["event_id"]
         asset_folder = cloud_settings.load_asset_folder(conn, config.data_dir).effective
-        try:
-            waiting = (len(rpi.rpi_items(report.comparison, rpi.event_folder(rpi_folder, event_id)))
-                       + len(assets.asset_items(report.comparison, assets.event_folder(asset_folder, event_id))))
-        except localfiles.LocalFileError as err:
-            progress.final_state = "error"
-            return [_line("error", str(err))]
-        progress.start(waiting)
-        result, notes = TransferResult(), []
-        for label, engine, folder in (("RPI files", rpi, rpi_folder), ("Files", assets, asset_folder)):
+        lines: list[dict] = []
+        stopped = cancelled = False
+
+        if download:
+            storage = storage_factory(settings)
             try:
-                result.add(engine.process(conn, storage, settings.account, location, event_id, report.comparison, folder,
-                                          config.data_dir, progress))
+                report = changes.check_event(conn, storage, settings, event_id)      # always from a fresh read
+            except changes.CheckError as err:
+                progress.final_state = "error"
+                return [_line("error", err.message)]
+            location = EventLocation(report.container, report.folder)
+            rpi_folder = cloud_settings.load_rpi_folder(conn, config.data_dir).effective
+            try:
+                waiting = (len(rpi.rpi_items(report.comparison, rpi.event_folder(rpi_folder, event_id)))
+                           + len(assets.asset_items(report.comparison, assets.event_folder(asset_folder, event_id))))
             except localfiles.LocalFileError as err:
-                notes.append(_line("error", f"{label}: {err}"))
-                result.failed += 1
-            if result.stopped or result.cancelled:
-                break
-        if result.stopped or result.cancelled:                     # the files not tried include the other engine's
-            done = result.downloaded + result.removed + result.failed + result.gone
-            result.remaining = max(result.remaining, waiting - done)
+                progress.final_state = "error"
+                return [_line("error", str(err))]
+            progress.identify(waiting)
+            progress.set_phase("Downloading", waiting)
+            result, notes = TransferResult(), []
+            for label, engine, folder in (("RPI files", rpi, rpi_folder), ("Files", assets, asset_folder)):
+                try:
+                    result.add(engine.process(conn, storage, settings.account, location, event_id, report.comparison, folder,
+                                              config.data_dir, progress))
+                except localfiles.LocalFileError as err:
+                    notes.append(_line("error", f"{label}: {err}"))
+                    result.failed += 1
+                    progress.tally_error()
+                if result.stopped or result.cancelled:
+                    break
+            stopped, cancelled = result.stopped, result.cancelled
+            if stopped or cancelled:                               # the files not tried include the other engine's
+                done = result.downloaded + result.removed + result.failed + result.gone
+                result.remaining = max(result.remaining, waiting - done)
+            lines += _describe_download(result) + notes
+
+        if push and not (stopped or cancelled):
+            try:
+                items, unmapped = sync.plan(conn, event_id, assets.event_folder(asset_folder, event_id))
+            except localfiles.LocalFileError as err:
+                items, unmapped = [], []
+                lines.append(_line("error", str(err)))
+            progress.identify(len(items))
+            progress.set_phase("Synchronising", len(items))
+            sresult = sync.process(conn, event_id, items, config.data_dir, progress, checker)
+            sresult.unmapped = unmapped
+            cancelled = cancelled or sresult.cancelled
+            lines += _describe_sync(sresult)
+        elif push:
+            lines.append(_line("info", "Synchronisation was not started because the download did not finish."))
+
+        eventstatus.refresh(conn, event_id)
         localchangelog.write(config.data_dir, conn, tz)
-        if not (result.stopped or result.cancelled):               # a stopped or cancelled job ends at once
+        if download and not (stopped or cancelled):                # a stopped or cancelled job ends at once
             try:
                 fresh = changes.check_event(conn, storage, settings, event_id)
                 if on_report is not None:
                     on_report(fresh)
             except changes.CheckError:
                 pass
-        progress.final_state = "cancelled" if result.cancelled else "done"
-        return _describe(result) + notes
+        progress.final_state = "cancelled" if cancelled else "done"
+        return lines
     finally:
         conn.close()
+
+
+def run_download(config, storage_factory, settings, event_id: str, progress: Progress, tz=None, on_report=None) -> list[dict]:
+    """Download only (the Change Log page's DOWNLOAD FILES)."""
+    return run_job(config, storage_factory, settings, event_id, progress, tz, on_report, download=True, push=False)

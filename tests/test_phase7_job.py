@@ -283,7 +283,7 @@ def test_a_job_that_crashes_ends_in_an_error_state_not_a_stuck_one():
         raise RuntimeError("secret detail")
     job = registry.start("1000", boom, inline=True)
     assert job.progress.state == "error" and "secret" not in str(job.summary) and not registry.running("1000")
-    assert registry.take_summary("1000") == [{"level": "error", "text": "The download stopped because of an unexpected problem."}]
+    assert registry.take_summary("1000") == [{"level": "error", "text": "The run stopped because of an unexpected problem."}]
     assert registry.take_summary("1000") == []
 
 
@@ -298,8 +298,8 @@ def test_progress_numbers(cfg):
     p.start(4)
     p.begin("a.png", 200)
     p.add_bytes(50)
-    assert p.snapshot() | {} == {"state": "running", "total": 4, "done": 0, "failed": 0, "current": "a.png", "percent": 25,
-                                 "message": "", "cancelling": False}
+    assert p.snapshot() == {"state": "running", "phase": "", "total": 4, "done": 0, "failed": 0, "current": "a.png", "percent": 25,
+                            "message": "", "cancelling": False, "identified": 0, "downloaded": 0, "synchronised": 0, "errors": 0}
     p.finish_file(False)
     p.cancel()
     snap = p.snapshot()
