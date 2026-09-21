@@ -88,4 +88,4 @@ Status values: **Pass**, **Fail**, **N/A at this stage**, **Accepted risk** (onl
 | Role | Name | Date | Outcome |
 |---|---|---|---|
 | Independent Solution Architect review | Independent review agent (fresh context) | 21/09/26 | **Approved with notes** — no blockers; S-15 – S-19 fixed; the fixes did not receive a second independent pass (noted in the QA document, F-26) |
-| User (Vatsan) go-ahead | | | Pending |
+| User (Vatsan) go-ahead | Vatsan | 21/09/26 | Approved (manual test passed) |

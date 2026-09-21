@@ -60,7 +60,7 @@ Reset: close the app, then `Remove-Item -Recurse -Force "$env:TEMP\ledsync-test-
 
 | Total cases | Passed | Failed | Blocked | Not yet run |
 |---|---|---|---|---|
-| 56 | 41 (38 automated TC-A01 – TC-A38 covering 211 new pytest cases, + 3 rendered-page TC-R01 – TC-R03) | 0 | 0 | 15 manual (TC-M01 – TC-M15, awaiting the user's run) |
+| 56 | 56 (38 automated TC-A01 – TC-A38 covering 211 new pytest cases, + 3 rendered-page TC-R01 – TC-R03 + 15 manual TC-M01 – TC-M15, run by the owner on 21/09/26: "All ok") | 0 | 0 | 0 |
 
 `.\.venv\Scripts\python -m pytest -q` → **418 passed** (Phases 0–3 combined; 211 new; TC-A31 – TC-A38 were added after the independent architect review). Screens were rendered from the app's real templates and viewed in Chrome (`docs/screenshots/phase3-*.jpg`); no password was typed into a browser.
 
@@ -119,7 +119,7 @@ Reset: close the app, then `Remove-Item -Recurse -Force "$env:TEMP\ledsync-test-
 
 | ID | Description | Severity | Status |
 |---|---|---|---|
-| F-17 | Manual checks TC-M01 – TC-M15 pending the owner's run. | Info | Awaiting user |
+| F-17 | Manual checks TC-M01 – TC-M15 run by the owner. | Info | Closed — passed |
 | F-18 | **Mappings on re-registration:** device mappings are currently left alone; whether to keep, clear or re-validate them when tables change is raised at Step 5.2. | Info | Carried to Phase 5 |
 | F-19 | **Last Updated** now shows the *export* time at registration (owner choice), not an asset update; Phase 6 replaces it from the change log. | Info | By design |
 | F-20 | The 100-table cap is a safety limit only; the business "maximum tables per event" remains open (BRD §36). | Info | Open |
@@ -136,4 +136,4 @@ Reset: close the app, then `Remove-Item -Recurse -Force "$env:TEMP\ledsync-test-
 | Role | Name | Date | Outcome |
 |---|---|---|---|
 | Independent Solution Architect review | Independent review agent (fresh context) | 21/09/26 | **Approved with notes** — no blockers. Ran 373 tests and probed the running app with its own scripts. Six "fix now" findings resolved (surrogate crash, spoofing characters, copy-back weakness, two-tab confusion, audit detail, transactionality — TC-A31 – TC-A38); notes carried forward as F-22 – F-25 |
-| User (Vatsan) go-ahead | | | Pending |
+| User (Vatsan) go-ahead | Vatsan | 21/09/26 | Approved — "All ok, finish the pending items in this step and move to next step" |
