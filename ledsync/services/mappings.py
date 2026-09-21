@@ -22,6 +22,7 @@ import ipaddress
 import os
 import re
 import sqlite3
+import unicodedata
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import PureWindowsPath
@@ -34,10 +35,11 @@ STATUS_UNTESTED = "Not tested"
 STATUS_OK = "Connection Successful"
 STATUS_FAILED = "Connection Failed"
 
-MAX_PATH_LENGTH = 240          # comfortably inside the classic Windows 260-character limit
+MAX_PATH_LENGTH = 200          # leaves room for a probe/asset file name inside the classic 260-character limit
 _BAD_CHARS = re.compile(r'[\x00-\x1f<>"|?*]')
 _HOST_RE = re.compile(r"^[A-Za-z0-9](?:[A-Za-z0-9._-]{0,251}[A-Za-z0-9])?$")
-_RESERVED = {"CON", "PRN", "AUX", "NUL", *(f"COM{i}" for i in range(1, 10)), *(f"LPT{i}" for i in range(1, 10))}
+_RESERVED = {"CON", "PRN", "AUX", "NUL", *(f"COM{i}" for i in range(1, 10)), *(f"LPT{i}" for i in range(1, 10)),
+             *(f"{p}{d}" for p in ("COM", "LPT") for d in "\u00b9\u00b2\u00b3")}
 
 
 class MappingError(ValueError):
@@ -100,6 +102,14 @@ def _is_inside(path: PureWindowsPath, root: PureWindowsPath) -> bool:
     return len(p) >= len(r) and p[: len(r)] == r
 
 
+def _is_this_computer(host: str) -> bool:
+    """A network path to THIS machine (localhost, 127.x, its own name) would reach any local folder
+    through an admin share and bypass the protected-folder check."""
+    h = host.casefold()
+    own = (os.environ.get("COMPUTERNAME") or "").casefold()
+    return h == "localhost" or h.startswith("localhost.") or h.startswith("127.") or bool(own and h.split(".")[0] == own)
+
+
 def validate_shared_folder(text: str, label: str = "", forbidden_roots: tuple = ()) -> str:
     """Return the normalised folder, or raise MappingError.
 
@@ -114,7 +124,8 @@ def validate_shared_folder(text: str, label: str = "", forbidden_roots: tuple = 
         return ""
     if len(value) > MAX_PATH_LENGTH:
         raise MappingError(f"{prefix}the folder path is too long (over {MAX_PATH_LENGTH} characters).")
-    if _BAD_CHARS.search(value):
+    if _BAD_CHARS.search(value) or any(
+            unicodedata.category(ch)[0] == "C" or (unicodedata.category(ch)[0] == "Z" and ch != " ") for ch in value):
         raise MappingError(f"{prefix}the folder path contains characters that are not allowed.")
 
     if value.startswith("\\\\"):
@@ -122,6 +133,9 @@ def validate_shared_folder(text: str, label: str = "", forbidden_roots: tuple = 
         host = parts[0]
         if host in ("?", ".") or not _HOST_RE.match(host):
             raise MappingError(f"{prefix}use a network folder like \\\\device\\share, not a device path.")
+        if _is_this_computer(host):
+            raise MappingError(f"{prefix}that is this computer. Use its local folder path (like C:\\LED\\Inner) "
+                               "instead of a network path.")
         segments = parts[1:]
         if not segments or not segments[0]:
             raise MappingError(f"{prefix}a network folder needs a share name, like \\\\{host}\\share.")
@@ -143,21 +157,44 @@ def validate_shared_folder(text: str, label: str = "", forbidden_roots: tuple = 
             raise MappingError(f"{prefix}folder names may not start with a space or end with a space or dot.")
         if ":" in seg:
             raise MappingError(f"{prefix}folder names may not contain a colon.")   # NTFS alternate data stream
-        if seg.split(".")[0].upper() in _RESERVED:
+        if seg.split(".")[0].rstrip(" ").upper() in _RESERVED:
             raise MappingError(f"{prefix}'{seg}' is a reserved Windows name.")
 
     normal = head + "\\" + "\\".join(segments)
-    pure = PureWindowsPath(normal)
-    for root in [*_protected_roots(), *[PureWindowsPath(str(r)) for r in forbidden_roots]]:
-        if _is_inside(pure, root):
-            raise MappingError(f"{prefix}that folder is reserved for the operating system or this application. "
-                               "Choose a dedicated folder for the LED files.")
+    if is_protected(normal, forbidden_roots) or is_protected(resolve_local(normal), forbidden_roots):
+        raise MappingError(f"{prefix}that folder is reserved for the operating system or this application. "
+                           "Choose a dedicated folder for the LED files.")
     return normal
 
 
+def _is_local_drive_path(path: str) -> bool:
+    return bool(re.match(r"^[A-Za-z]:\\", path))
+
+
+def resolve_local(path: str) -> str:
+    """The real location of a LOCAL drive path: 8.3 short names expanded, junctions/links followed.
+    UNC paths are returned unchanged - resolving one means a network call, which a web request
+    must never wait for (the connection test resolves them on its own time-limited thread)."""
+    if not _is_local_drive_path(path):
+        return path
+    try:
+        return os.path.realpath(path)
+    except (OSError, ValueError):
+        return path
+
+
+def is_protected(path: str, forbidden_roots: tuple = ()) -> bool:
+    """True if `path` is, or is inside, an operating-system folder or the application's own data."""
+    roots = [*_protected_roots(), *[PureWindowsPath(str(r)) for r in forbidden_roots]]
+    roots += [PureWindowsPath(os.path.realpath(str(r))) for r in [*forbidden_roots]]   # long-name form of the same folder
+    pure = PureWindowsPath(path)
+    return any(_is_inside(pure, root) for root in roots)
+
+
 def folder_key(path: str) -> str:
-    """Windows folder names ignore case, so duplicates are detected ignoring case."""
-    return path.casefold().rstrip("\\")
+    """Windows folder names ignore case, and a local folder can be reached by several names
+    (8.3 short name, junction), so duplicates are detected on the resolved path, ignoring case."""
+    return resolve_local(path).casefold().rstrip("\\")
 
 
 # --- persistence --------------------------------------------------------------------------------------------
@@ -184,8 +221,18 @@ def reconcile(conn: sqlite3.Connection, event_id: str, pairs, *, reset_status: b
     wanted = set(pairs)
     existing = {(r["table_number"], r["led_type"]): r
                 for r in conn.execute("SELECT * FROM led_mappings WHERE event_id = ?", (event_id,))}
-    for pair in wanted:
+    in_use = {folder_key(r["shared_folder"]) for pair, r in existing.items() if r["enabled"] and pair in wanted and r["shared_folder"]}
+    for pair in sorted(wanted, key=lambda p: (p[0], LED_TYPES.index(p[1]) if p[1] in LED_TYPES else 99)):
         row = existing.get(pair)
+        if row is not None and not row["enabled"] and row["shared_folder"]:
+            key = folder_key(row["shared_folder"])
+            if key in in_use:
+                # Another enabled destination took this folder while this LED was hidden: the returning
+                # LED comes back unmapped rather than breaking the one-folder-per-destination rule.
+                conn.execute("UPDATE led_mappings SET shared_folder = '', connection_status = NULL, "
+                             "last_connection_test = NULL WHERE mapping_id = ?", (row["mapping_id"],))
+            else:
+                in_use.add(key)
         if row is None:
             conn.execute("INSERT INTO led_mappings (event_id, table_number, led_type, ip_address, shared_folder, enabled) "
                          "VALUES (?, ?, ?, '', '', 1)", (event_id, pair[0], pair[1]))
@@ -238,8 +285,8 @@ def save_mappings(conn: sqlite3.Connection, event_id: str, structure, entries: d
     # A folder used by an enabled destination that was NOT part of this post still counts.
     for pair, m in current.items():
         if pair not in cleaned and m.shared_folder and folder_key(m.shared_folder) in seen:
-            raise MappingError(f"Table {pair[0]} {LED_LABELS[pair[1]]} already uses "
-                               f"{seen[folder_key(m.shared_folder)]}'s folder.")
+            raise MappingError(f"{seen[folder_key(m.shared_folder)]}: this folder is already used by "
+                               f"Table {pair[0]} {LED_LABELS[pair[1]]}. Each LED destination needs its own folder.")
 
     changed = []
     try:
@@ -255,9 +302,8 @@ def save_mappings(conn: sqlite3.Connection, event_id: str, structure, entries: d
                 conn.execute("UPDATE led_mappings SET ip_address = ?, shared_folder = ?, connection_status = NULL, "
                              "last_connection_test = NULL WHERE mapping_id = ?", (ip, folder, m.mapping_id))
             changed.append(f"Table {pair[0]} {LED_LABELS[pair[1]]}")
-        oplog.add(conn, "Mapping Saved", "Success",
-                  (f"Device mapping saved for {', '.join(changed)}." if changed else "Device mapping saved (no change)."),
-                  event_id=event_id)
+        if changed:
+            oplog.add(conn, "Mapping Saved", "Success", f"Device mapping saved for {', '.join(changed)}.", event_id=event_id)
         conn.commit()
     except sqlite3.Error:
         conn.rollback()
@@ -266,16 +312,22 @@ def save_mappings(conn: sqlite3.Connection, event_id: str, structure, entries: d
 
 
 def record_test(conn: sqlite3.Connection, mapping: Mapping, ok: bool, message: str, category: str | None,
-                warning: str = "") -> None:
+                warning: str = "") -> bool:
     """Store a connection-test outcome on the mapping and in the logs (BRD 13 step 6), in one transaction."""
     from . import exceptions
 
     status = STATUS_OK if ok else STATUS_FAILED
     try:
-        conn.execute("UPDATE led_mappings SET connection_status = ?, last_connection_test = ? WHERE mapping_id = ?",
-                     (status, _now(), mapping.mapping_id))
-        oplog.add(conn, "Device Test", "Success" if ok else "Failed", f"{mapping.label}: {status}. {message}".strip(),
-                  event_id=mapping.event_id)
+        # Only if the row still holds the folder that was tested and is still part of the event: the test
+        # takes up to 10 s, and the operator (or a re-registration) may have changed the destination meanwhile.
+        done = conn.execute("UPDATE led_mappings SET connection_status = ?, last_connection_test = ? "
+                            "WHERE mapping_id = ? AND shared_folder = ? AND enabled = 1",
+                            (status, _now(), mapping.mapping_id, mapping.shared_folder)).rowcount
+        if not done:
+            conn.rollback()
+            return False
+        oplog.add(conn, "Device Test", "Success" if ok else "Failed",
+                  f"{mapping.label}: {status}. {message} {warning}".strip(), event_id=mapping.event_id)
         if not ok:
             conn.execute(
                 "INSERT INTO exception_log (event_id, timestamp, operation, category, message, resolution_status, "
@@ -283,6 +335,7 @@ def record_test(conn: sqlite3.Connection, mapping: Mapping, ok: bool, message: s
                 (mapping.event_id, _now(), "Test Connection", category or exceptions.NETWORK_DEVICE, message,
                  exceptions.OPEN, mapping.table_number, mapping.led_type, mapping.shared_folder))
         conn.commit()
+        return True
     except sqlite3.Error:
         conn.rollback()
         raise MappingError("The test result could not be saved.") from None

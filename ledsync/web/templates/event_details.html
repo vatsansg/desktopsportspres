@@ -48,6 +48,8 @@
     <form method="post" action="{{ url_for('devices.save_or_test', event_id=event.event_id) }}" novalidate
           data-busy-text="WORKING…">
       <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+      {# First submit button in the form = what Enter does in a text box. It must be Save, not the first row's Test. #}
+      <button type="submit" name="action" value="save" class="sr-only" tabindex="-1">Save mapping</button>
       <div class="table-wrap" tabindex="0" role="region" aria-label="Device mapping table">
         <table class="data-table map-table">
           <caption class="sr-only">One row per enabled LED: IP address, shared folder and connection status</caption>
@@ -58,11 +60,11 @@
           <tbody>
             {% for r in rows %}
             <tr>
-              <td class="nowrap">Table {{ r.table }}</td>
+              <th scope="row" class="nowrap">Table {{ r.table }}</th>
               <td class="nowrap">{{ r.led }}</td>
               <td><input type="text" name="{{ r.ip_name }}" value="{{ r.ip }}" maxlength="45" autocomplete="off"
                          spellcheck="false" class="cell-input ip-input" aria-label="IP address for {{ r.label }}"></td>
-              <td><input type="text" name="{{ r.folder_name }}" value="{{ r.folder }}" maxlength="240" autocomplete="off"
+              <td><input type="text" name="{{ r.folder_name }}" value="{{ r.folder }}" maxlength="200" autocomplete="off"
                          spellcheck="false" class="cell-input mono-input" aria-label="Shared folder for {{ r.label }}"></td>
               <td><span class="badge badge-{{ r.status_class }}">{{ r.status }}</span>
                   {% if r.tested %}<span class="tested-at">{{ r.tested }}</span>{% endif %}</td>

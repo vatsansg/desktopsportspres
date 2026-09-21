@@ -450,6 +450,12 @@ def test_check_many_returns_a_result_for_every_key(tmp_path):
 
 
 def test_the_checker_never_touches_azure_or_the_network_stack():
-    src = (ROOT / "ledsync" / "services" / "connectivity.py").read_text(encoding="utf-8")
-    for banned in ("import socket", "subprocess", "azure", "requests", "urllib", "ping"):
-        assert banned not in src.replace("ping is used at all", ""), banned
+    import ast
+    tree = ast.parse((ROOT / "ledsync" / "services" / "connectivity.py").read_text(encoding="utf-8"))
+    imported = set()
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Import):
+            imported |= {a.name.split(".")[0] for a in node.names}
+        elif isinstance(node, ast.ImportFrom) and node.level == 0:
+            imported.add((node.module or "").split(".")[0])
+    assert not imported & {"socket", "subprocess", "requests", "urllib", "http", "azure", "ctypes", "asyncio"}, imported

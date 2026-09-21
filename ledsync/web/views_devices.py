@@ -1,5 +1,8 @@
 """Event details: LED structure (Step 5.1), device/folder mapping (Step 5.2) and connection tests (Step 5.3)."""
 
+import logging
+import sqlite3
+
 from flask import Blueprint, abort, current_app, flash, redirect, render_template, request, session, url_for
 
 from .. import APP_NAME, __version__
@@ -7,6 +10,7 @@ from ..services import connectivity, events as event_service, mappings, registra
 from .app_db import get_db
 from .security import login_required
 
+log = logging.getLogger(__name__)
 bp = Blueprint("devices", __name__, url_prefix="/events")
 
 STATUS_CLASS = {
@@ -72,7 +76,11 @@ def details(event_id):
                                username=session.get("user"), event=row, structure=None, structure_error=str(err),
                                rows=[], hidden=[], led_types=structure.LED_TYPES, led_labels=structure.LED_LABELS,
                                error=None)
-    mappings.ensure_rows(get_db(), row["event_id"], struct)        # idempotent: creates any missing rows
+    try:
+        mappings.ensure_rows(get_db(), row["event_id"], struct)    # idempotent: creates any missing rows
+    except sqlite3.Error:
+        log.warning("Could not create the mapping rows for an event.")   # the page still opens with what exists
+        get_db().rollback()
     return _render(row, struct)
 
 
@@ -136,11 +144,19 @@ def _run_tests(row, action):
     else:
         abort(400)
 
-    results = _checker()({m.mapping_id: m.shared_folder for m in targets})
+    data_dir = current_app.config["LEDSYNC"].data_dir
+    results = _checker()({m.mapping_id: m.shared_folder for m in targets}, forbidden_roots=(data_dir,))
     ok_count = 0
     for m in targets:
         result = results[m.mapping_id]
-        mappings.record_test(db, m, result.ok, result.message, result.category, result.warning)
+        try:
+            recorded = mappings.record_test(db, m, result.ok, result.message, result.category, result.warning)
+        except mappings.MappingError as err:
+            flash(str(err), "error")
+            return redirect(url_for("devices.details", event_id=row["event_id"]))
+        if not recorded:
+            flash(f"{m.label}: the folder was changed while it was being tested. Run the test again.", "info")
+            continue
         if result.ok:
             ok_count += 1
             if result.warning:

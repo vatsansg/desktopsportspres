@@ -21,14 +21,15 @@ import time
 import uuid
 from dataclasses import dataclass
 
-from . import exceptions
+from . import exceptions, mappings
 
 DEFAULT_TIMEOUT = 10.0          # seconds allowed for one destination
 PROBE_PREFIX = ".ledsync-probe-"
 
 # Windows error numbers (winerror) grouped by what the operator should check.
 _NETWORK = {51, 52, 53, 55, 59, 64, 121, 1203, 1225, 1231, 1232}   # remote not listening, path not found, device gone, unreachable, timeouts
-_NO_SUCH_SHARE_OR_FOLDER = {2, 3, 67, 123, 161, 206}              # file/path not found, network NAME not found (share missing), bad name
+_NO_SUCH_SHARE_OR_FOLDER = {2, 3, 67, 123, 161}                   # file/path not found, network NAME not found (share missing), bad name
+_TOO_LONG = {206}                                                 # file name or extension too long
 _ACCESS = {5, 86, 1219, 1326, 1385, 1909}                         # access denied, bad password, conflicting credentials, logon failure/refused
 _READ_ONLY = {19}                                                 # media is write-protected
 
@@ -63,6 +64,8 @@ def _classify(err: OSError, doing: str) -> CheckResult:
     if win in _NETWORK or isinstance(err, ConnectionError):
         return _fail(exceptions.NETWORK_DEVICE,
                      "The device could not be reached. Check the device is on, on the network, and the name is right.")
+    if win in _TOO_LONG:
+        return _fail(exceptions.CONFIGURATION, "The folder path is too long for Windows. Use a shorter path.")
     if isinstance(err, FileNotFoundError) or win in _NO_SUCH_SHARE_OR_FOLDER:
         return _fail(exceptions.MISSING_FOLDER, "The folder does not exist. Check the shared folder name and path.")
     return _fail(exceptions.FILE_ACCESS, f"The folder could not be used while {doing}.")
@@ -72,7 +75,7 @@ def _probe_name() -> str:
     return f"{PROBE_PREFIX}{uuid.uuid4().hex}.tmp"
 
 
-def _check_folder_blocking(path: str) -> CheckResult:
+def _check_folder_blocking(path: str, forbidden_roots: tuple = ()) -> CheckResult:
     """The actual checks. May block for a long time on an unreachable network path."""
     try:
         mode = os.stat(path).st_mode
@@ -80,6 +83,13 @@ def _check_folder_blocking(path: str) -> CheckResult:
         return _classify(err, "opening the folder")
     if not stat.S_ISDIR(mode):
         return _fail(exceptions.CONFIGURATION, "That path is a file, not a folder.")
+    try:
+        real = os.path.realpath(path)                 # follows junctions and expands 8.3 names
+    except (OSError, ValueError):
+        real = path
+    if mappings.is_protected(real, forbidden_roots):
+        return _fail(exceptions.CONFIGURATION, "That folder is reserved for the operating system or this application, "
+                                               "so it cannot be used. Choose a dedicated folder for the LED files.")
 
     try:
         with os.scandir(path) as entries:                  # can the folder be listed?
@@ -102,15 +112,15 @@ def _check_folder_blocking(path: str) -> CheckResult:
     return CheckResult(True, "The folder can be opened and written to.")
 
 
-def check_folder(path: str, timeout: float = DEFAULT_TIMEOUT, _check=None) -> CheckResult:
+def check_folder(path: str, timeout: float = DEFAULT_TIMEOUT, _check=None, forbidden_roots: tuple = ()) -> CheckResult:
     """Run the check with a hard deadline. Never raises."""
-    return check_many({"only": path}, timeout, _check)["only"]
+    return check_many({"only": path}, timeout, _check, forbidden_roots)["only"]
 
 
-def check_many(paths: dict, timeout: float = DEFAULT_TIMEOUT, _check=None) -> dict:
+def check_many(paths: dict, timeout: float = DEFAULT_TIMEOUT, _check=None, forbidden_roots: tuple = ()) -> dict:
     """Check several destinations IN PARALLEL under one shared deadline (so 'Test All' on a venue with
     a dead device takes ~`timeout` seconds, not `timeout` x N). `paths` maps a key to a folder path."""
-    check = _check or _check_folder_blocking
+    check = _check or (lambda p: _check_folder_blocking(p, forbidden_roots))
     results: dict = {}
     lock = threading.Lock()
 

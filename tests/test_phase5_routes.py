@@ -253,7 +253,7 @@ def test_an_invalid_form_is_not_tested(ev, cfg, shares):
 
 def test_a_probe_that_cannot_be_removed_shows_a_notice_but_passes(ev, shares):
     good = folder(shares, "g")
-    ev.application.extensions["ledsync.checker"] = lambda paths: {
+    ev.application.extensions["ledsync.checker"] = lambda paths, **kw: {
         k: connectivity.CheckResult(True, "ok", None, "A small empty test file could not be removed (x).") for k in paths}
     html = post(ev, {"action": "test-all", "folder-1-Inner": good}, follow=True).get_data(as_text=True)
     assert "could not be removed" in html and "1 of 1 destination passed" in html
@@ -261,7 +261,7 @@ def test_a_probe_that_cannot_be_removed_shows_a_notice_but_passes(ev, shares):
 
 def test_a_dead_device_is_reported_within_the_deadline_and_the_page_stays_usable(ev, cfg, monkeypatch):
     real = connectivity.check_many
-    ev.application.extensions["ledsync.checker"] = lambda paths: real(paths, timeout=0.3, _check=lambda p: __import__("time").sleep(3))
+    ev.application.extensions["ledsync.checker"] = lambda paths, **kw: real(paths, timeout=0.3, _check=lambda p: __import__("time").sleep(3))
     html = post(ev, {"action": "test-all", "folder-1-Inner": r"\\dead\share"}, follow=True).get_data(as_text=True)
     assert "did not respond" in html and "Connection Failed" in html
     assert page(ev).count("badge-attention") == 1
@@ -300,3 +300,11 @@ def test_reregistering_with_a_changed_structure_updates_the_page(ev, cfg, shares
     assert "Previously mapped" in html and "(1)" in html
     inner = next(r for r in mapping_rows(cfg) if (r["table_number"], r["led_type"]) == (1, "Inner"))
     assert inner["shared_folder"].endswith("a") and inner["connection_status"] is None
+
+
+def test_enter_in_a_text_box_saves_it_does_not_run_a_test(ev):
+    """Pressing Enter submits with the FIRST submit button of the form: that must be Save, not a row's Test."""
+    html = page(ev)
+    form = html[html.index("<form"):]
+    first = re.search(r'<button type="submit" name="action" value="([^"]+)"', form)
+    assert first.group(1) == "save"
