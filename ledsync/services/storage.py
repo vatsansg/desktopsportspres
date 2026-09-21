@@ -269,7 +269,7 @@ class AzureReadOnlyStorage:
                                    f"More than one folder in the event folder matches {folder_path} apart from letter "
                                    "case, so it was not used. Ask the web application administrator to rename one.")
             return [BlobInfo(frontier[0][len(location.folder) + 1:] + entry[0], entry[2], entry[3], entry[4])
-                    for entry in self._listing(location.container, frontier[0], cache) if entry[1] is False]
+                    for entry in self._listing(location.container, frontier[0], cache) if entry[1]]
         except StorageError:
             raise
         except Exception as exc:                                       # noqa: BLE001

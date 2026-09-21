@@ -230,4 +230,7 @@ a.btn-secondary[href] { text-decoration: none; }
 .hint a:hover, .lede a:hover, .panel a:not(.btn):hover { color: var(--text); }
 
 /* ---- Download progress ---- */
-progress { width: 100%; height: 14px; accent-color: var(--wtt-blue); }
+progress { width: 100%; height: 16px; appearance: none; -webkit-appearance: none; border: 1px solid var(--text-muted); border-radius: 8px; background: #1a1a1a; overflow: hidden; }
+progress::-webkit-progress-bar { background: #1a1a1a; }
+progress::-webkit-progress-value { background: var(--wtt-blue); }
+progress::-moz-progress-bar { background: var(--wtt-blue); }
