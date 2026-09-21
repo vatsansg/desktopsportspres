@@ -12,6 +12,7 @@
     <div class="section-head">
       <h2 id="events-heading">Events</h2>
       {% if events %}<p class="count">{{ events|length }} registered</p>{% endif %}
+      <a class="btn btn-primary section-action" href="{{ url_for('events.new') }}">ADD NEW EVENT</a>
     </div>
 
     {% if events %}
@@ -42,7 +43,7 @@
     {% else %}
     <div class="panel empty-state">
       <h3>No Events Registered Yet</h3>
-      <p>Registered events appear here with their latest update and status. Event registration arrives in Phase 3.</p>
+      <p>Registered events appear here with their latest update and status. Use <strong>Add New Event</strong> to register your first one.</p>
     </div>
     {% endif %}
   </section>

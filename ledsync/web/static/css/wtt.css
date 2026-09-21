@@ -101,6 +101,7 @@ input:focus-visible { border-color: var(--wtt-blue); outline-offset: 0; }
 }
 .alert-error { color: var(--status-error); border-color: var(--status-error); }
 .alert-success { color: var(--status-ok); border-color: var(--status-ok); }
+.alert-info { color: var(--text); border-color: var(--wtt-blue); }
 
 /* ---- Logo (white wordmark + brand mark on transparent; made for dark surfaces) ---- */
 .logo { display: block; height: auto; }
@@ -125,6 +126,7 @@ input:focus-visible { border-color: var(--wtt-blue); outline-offset: 0; }
 
 .page { padding: 2rem; max-width: none; }
 .page-narrow { max-width: 560px; }
+.page-medium { max-width: 800px; }
 
 .panel {
   background: var(--surface-raised); border: 1px solid var(--border-subtle);
@@ -169,3 +171,22 @@ input:focus-visible { border-color: var(--wtt-blue); outline-offset: 0; }
 }
 
 .version { position: fixed; right: 16px; bottom: 12px; color: var(--text-muted); font-size: 0.8rem; }
+
+/* ---- Add / re-register event ---- */
+.section-action { margin-left: auto; align-self: center; }
+input[type="file"] {
+  font: inherit; color: var(--text); width: 100%; padding: 0.55rem 0.75rem;
+  background: var(--surface-raised); border: 2px solid var(--border); border-radius: 4px;
+}
+input[type="file"]:hover { border-color: var(--wtt-white); }
+input[type="file"]::file-selector-button {
+  font: inherit; font-weight: 700; color: var(--text); background: var(--surface);
+  border: 2px solid var(--border); border-radius: 4px; padding: 0.35rem 0.9rem; margin-right: 0.9rem; cursor: pointer;
+}
+.mono, .mono-input { font-family: Consolas, "Courier New", monospace; }
+.kv { display: grid; grid-template-columns: max-content 1fr; gap: 0.5rem 1.5rem; margin: 1.25rem 0; padding: 1rem 1.25rem;
+      background: var(--surface-raised); border: 1px solid var(--border-subtle); border-radius: 6px; }
+.kv dt { color: var(--text-muted); font-weight: 700; }
+.kv dd { margin: 0; overflow-wrap: anywhere; }
+.kv dd.mono { white-space: nowrap; overflow-wrap: normal; letter-spacing: 0.02em; }  /* a GUID must stay on ONE line to be compared by eye */
+.cancel-form { margin-top: 1rem; }

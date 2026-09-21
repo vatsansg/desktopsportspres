@@ -10,6 +10,8 @@ from ..services.auth import LoginThrottle
 from . import security
 from .app_db import close_db, get_db  # noqa: F401  (get_db re-exported for callers/tests)
 from .views import bp
+from .views_events import bp as events_bp
+from ..services.registration import PendingReregistrations
 
 
 # Plain, non-technical wording; nothing internal is revealed.
@@ -46,6 +48,7 @@ def create_app(config: Config) -> Flask:
     # tzinfo used to display timestamps; None = this machine's local time (owner decision).
     app.config["DISPLAY_TZ"] = None
     app.extensions["ledsync.throttle"] = LoginThrottle()
+    app.extensions["ledsync.pending"] = PendingReregistrations()
 
     @app.before_request
     def _reject_foreign_host():
@@ -58,6 +61,7 @@ def create_app(config: Config) -> Flask:
     security.install(app)  # registered after the host check, so it runs after it
     app.teardown_appcontext(close_db)
     app.register_blueprint(bp)
+    app.register_blueprint(events_bp)
 
     @app.errorhandler(400)
     @app.errorhandler(403)

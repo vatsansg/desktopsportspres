@@ -9,3 +9,12 @@ document.addEventListener("click", function (event) {
   button.textContent = show ? "Hide" : "Show";
   input.focus();
 });
+
+// When a page loads with an error, move focus to it so keyboard and screen-reader users
+// meet the message first (role="alert" alone is not reliably announced on a full page load).
+document.addEventListener("DOMContentLoaded", function () {
+  var alertBox = document.querySelector("[data-focus-alert]");   // opt-in: not the login page, which autofocuses Username
+  if (!alertBox) return;
+  alertBox.setAttribute("tabindex", "-1");
+  alertBox.focus();
+});

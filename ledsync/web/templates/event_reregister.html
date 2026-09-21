@@ -1,0 +1,50 @@
+{% extends "base.html" %}
+{% block title %}Re-Register Event — {{ app_name }}{% endblock %}
+{% block body %}
+{% include "_topbar.html" %}
+<main class="page page-medium">
+  <h1>Re-Register Event</h1>
+  <p class="lede">Event {{ pending.event_id }} is already registered, but with a <strong>different GUID</strong>.</p>
+
+  <p>This happens when the event is exported again in the web application: every export creates a
+    new GUID. To make sure you are replacing the registration with the export you intend, get the
+    <strong>new GUID from the web application</strong> and paste it below. It must match the GUID in the
+    file you just chose. (For your safety the file's GUID is not shown in full &mdash; only its ending, so
+    you can tell which export it is.)</p>
+
+  <dl class="kv">
+    <dt>Event</dt><dd>{{ pending.config.event_name }} ({{ pending.event_id }})</dd>
+    <dt>GUID registered now</dt><dd class="mono">{{ pending.recorded_guid or "none" }}</dd>
+    <dt>GUID in the file ends</dt><dd class="mono">&hellip;{{ file_guid_tail }}</dd>
+  </dl>
+
+  {% for category, message in get_flashed_messages(with_categories=true) %}
+  <p class="alert alert-{{ category }}" role="alert">{{ message }}</p>
+  {% endfor %}
+  {% if error %}
+  <p id="form-error" data-focus-alert class="alert alert-error" role="alert">{{ error }}</p>
+  {% endif %}
+
+  <form method="post" action="{{ url_for('events.reregister_post') }}" class="panel" novalidate>
+    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+    <input type="hidden" name="pending_token" value="{{ token }}">
+    <div class="field">
+      <label for="pasted_guid">New GUID from the web application</label>
+      <input id="pasted_guid" name="pasted_guid" type="text" maxlength="80" autocomplete="off"
+             spellcheck="false" required {% if not error %}autofocus{% endif %} class="mono-input"
+             aria-describedby="{% if error %}form-error {% endif %}guid-hint"
+             {% if error %}aria-invalid="true"{% endif %}>
+      <p id="guid-hint" class="hint">Example: 3f2b8c1e-4d5a-4b7e-9c10-0a1b2c3d4e5f</p>
+    </div>
+    <div class="form-actions">
+      <button type="submit" class="btn btn-primary">RE-REGISTER EVENT</button>
+    </div>
+  </form>
+
+  <form method="post" action="{{ url_for('events.reregister_cancel') }}" class="cancel-form">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+    <input type="hidden" name="pending_token" value="{{ token }}">
+    <button type="submit" class="btn btn-secondary">Cancel &mdash; keep the current registration</button>
+  </form>
+</main>
+{% endblock %}

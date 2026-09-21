@@ -65,8 +65,26 @@ Status values: `Not started` / `In progress` / `Awaiting user go-ahead` / `Compl
   3. Date-only stored values (`2026-09-08`) are treated as UTC midnight, so west of UTC they show as the previous day. Application-written values always carry a time.
 
 ## Phase 3 — Event Registration and GUID Validation
-- **Status:** Not started
-- **Completed on:** / **What was built:** / **QA Test Case doc:** / **Security Checklist:** / **Deviations:**
+- **Status:** Awaiting user go-ahead (built, polished and independently reviewed 21 September 2026; the owner's manual test is pending; committed on branch `phase-3-event-registration` only — not merged to `main`, not pushed)
+- **Completed on:** 21 September 2026 (pending the owner's manual test)
+- **What was built:**
+  - **Step 3.1 — Add New Event:** an orange **ADD NEW EVENT** button on the Dashboard opens a form (Event ID + file picker). The chosen `_GUID.json` is strictly parsed and validated (BRD 10): JSON well-formed with no duplicate keys/NaN; `eventId` equals the ID typed; `eventName`; https `eventStorageUrl`; valid non-nil `exportGuid`; ≥1 table with unique numbers and Inner/Outer/Main booleans (safety cap 100 tables). A valid file creates the `events` row (ID, name, lower-case GUID, source, `configuration_json`, status **Registered**, Last Updated = the file's export time, normalised to UTC).
+  - **Step 3.2 — GUID validation (BRD 9.2):** first registration checks the GUID is well-formed and not owned by another event; an already-registered event compares recorded vs file GUID — match = harmless notice, mismatch = **rejected and logged** to the new minimal **exception log** (BRD 21/21.1, all ten categories defined). Typos are shown but not logged.
+  - **Re-registration (owner design):** on a mismatch the operator is redirected to **Re-Register Event** and must paste the new GUID copied from the web application, which must equal the GUID in the newly supplied file; the file's GUID is shown only by its last 6 characters so it cannot be copied back. A wrong paste is refused and logged; Cancel keeps the old registration. The rejected file is held server-side briefly (15 min, single use, bounded) and the form is bound to that exact request.
+  - **Audit:** registration and re-registration are written to `operation_log` in the same transaction as the change, with the GUID(s) and source (re-registration: `old -> new`).
+  - **Test data:** nine scenario files with a README in `docs/testfiles/phase3/`.
+  - 418 automated tests pass (Phases 0–3; 211 new). Screens rendered from the real templates and viewed in Chrome (`docs/screenshots/phase3-*.jpg`).
+- **QA Test Case doc:** `docs/QA_Desktop_Phase3_EventRegistration.md` — 56 cases: 41 pass (38 automated groups, 3 rendered-page), 15 manual pending the owner's run; includes the step-by-step real-app guide.
+- **Security Checklist:** `docs/Security_Desktop_Phase3_EventRegistration.md` (B2 scope guard re-verified: registration code never touches `application_settings`)
+- **Independent architect review:** **Approved with notes**, no blockers (ran the suite and probed the running app). Six "fix now" findings resolved: lone-surrogate crash (500, unlogged), spoofing/bidi characters accepted, the re-register page displaying the GUID the operator was meant to obtain independently, the re-register form not bound to its page (two-tab confusion), audit rows lacking GUIDs, and event/audit rows not committed atomically. Cheap notes also done: timestamp normalisation, re-registration clears `last_download`/`last_sync`, error focus/`aria-describedby`. **Carried forward:** Phase 4 host allow-list for `eventStorageUrl` and Event-ID case rule; UNIQUE index on GUID (with the migration runner); widen the rejection logger at Phase 8. The fixes were verified by 45 new tests but did **not** get a second independent review pass.
+- **`ralph-loop` / `wtt-brand`:** run (2 of max 2 iterations; completion promise met). Change: the re-register screen widened so GUIDs stay on one line (later superseded by hiding the file GUID). Brand rules held: orange only on the single primary action per screen.
+- **Deviations:**
+  1. **Last Updated at registration = export time from `_GUID.json`** (owner choice, 21 Sep 2026) — differs from BRD 7.2's “latest relevant asset update”; Phase 6 will overwrite it from the change log.
+  2. **Re-registration flow is stricter than BRD 9.2** (owner design): the operator must paste the new GUID from the web application; the file's GUID is deliberately not displayed in full.
+  3. **File picker upload instead of a typed path** (owner choice); the Implementation Sequence says “point it at a local file”.
+  4. **Re-registration clears `last_download`/`last_sync` and resets status to Registered** (nothing has come from the new export). Device mappings are left untouched — whether to keep/clear/re-validate them is raised at Step 5.2.
+  5. A technical 100-table cap protects against hostile files; it is **not** the open BRD §36 “maximum tables” decision.
+  6. Browser password entry was again not performed; screens verified from rendered pages, and the owner's manual run in the real window is the true check.
 
 ## Phase 4 — Azure Storage Connectivity
 - **Status:** Not started
@@ -123,7 +141,7 @@ Status values: `Not started` / `In progress` / `Awaiting user go-ahead` / `Compl
 | 0 | Complete | 20 Sep 2026 | `a35cfe2` |
 | 1 | Complete | 21 Sep 2026 | `47e3461` (merge `47ca4f7`); logo follow-up `8ffc002` |
 | 2 | Complete | 21 Sep 2026 | `29e54c5` + `ac03ded` (merge `8d2c25e`) |
-| 3 | Not started | | |
+| 3 | Awaiting user go-ahead | | branch `phase-3-event-registration` (local only) |
 | 4 | Not started | | |
 | 5 | Not started | | |
 | 6 | Not started | | |
