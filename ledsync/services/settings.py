@@ -4,6 +4,8 @@ Stored in `application_settings`:
     cloud_storage_account   e.g. sasportspresentation
     cloud_container         default YEAR container used to find a new event, e.g. 2026
     cloud_access_key        the Storage Account access key
+    rpi_folder              where files from the event's `RPI` folder are saved on this computer
+                            (empty = the default `RPI` folder inside the application data folder)
 
 OWNER DECISION (21/09/26): the access key is stored as PLAIN TEXT in the database. This
 departs from BRD 33.3 ("must not be stored as plain text where avoidable") and is recorded
@@ -23,13 +25,16 @@ import re
 import sqlite3
 from dataclasses import dataclass, field
 
+from pathlib import Path
+
 from .. import config as app_config
-from . import oplog
+from . import mappings, oplog
 
 KEY_ACCOUNT = "cloud_storage_account"
 KEY_CONTAINER = "cloud_container"
 KEY_ACCESS = "cloud_access_key"
-OWNED_KEYS = frozenset({KEY_ACCOUNT, KEY_CONTAINER, KEY_ACCESS})
+KEY_RPI_FOLDER = "rpi_folder"
+OWNED_KEYS = frozenset({KEY_ACCOUNT, KEY_CONTAINER, KEY_ACCESS, KEY_RPI_FOLDER})
 
 DEV_ACCOUNT = "STORAGE_ACCOUNT_NAME"
 DEV_CONTAINER = "STORAGE_CONTAINER"
@@ -221,6 +226,56 @@ def save_cloud(conn: sqlite3.Connection, account: str, container: str, new_key: 
             changed.append("access key")
         oplog.add(conn, "Settings Changed", "Success",
                   "Cloud storage settings saved" + (f" ({', '.join(changed)} changed)." if changed else " (no change)."))
+        conn.commit()
+    except sqlite3.Error:
+        conn.rollback()
+        raise SettingsError("The settings could not be saved. Try again.") from None
+    return changed
+
+
+# --- local folders (RPI) -------------------------------------------------------------------------------
+
+DEFAULT_RPI_NAME = "RPI"
+
+
+def default_rpi_folder(data_dir) -> Path:
+    return Path(data_dir) / DEFAULT_RPI_NAME
+
+
+@dataclass(frozen=True)
+class RpiFolder:
+    saved: str               # what the operator entered ("" = use the default)
+    effective: Path          # where files really go
+    is_default: bool
+
+
+def load_rpi_folder(conn: sqlite3.Connection, data_dir) -> RpiFolder:
+    saved = _get(conn, KEY_RPI_FOLDER).strip()
+    return RpiFolder(saved, Path(saved) if saved else default_rpi_folder(data_dir), not saved)
+
+
+def validate_rpi_folder(text: str, data_dir) -> str:
+    """"" (use the default) or a validated absolute folder. A folder inside the application data
+    folder is refused - the default already lives there - so a downloaded file can never sit
+    beside the database."""
+    value = (text or "").strip()
+    if not value:
+        return ""
+    try:
+        return mappings.validate_shared_folder(value, "RPI folder", forbidden_roots=(data_dir,))
+    except mappings.MappingError as err:
+        raise SettingsError(f"{err} Leave the box empty to use the default RPI folder.") from None
+
+
+def save_rpi_folder(conn: sqlite3.Connection, text: str, data_dir) -> bool:
+    """Validate and save; returns whether anything changed. The audit row is in the same transaction."""
+    value = validate_rpi_folder(text, data_dir)
+    try:
+        changed = _get(conn, KEY_RPI_FOLDER) != value
+        if changed:
+            _put(conn, KEY_RPI_FOLDER, value)
+        oplog.add(conn, "Settings Changed", "Success",
+                  "Local folders saved (RPI folder changed)." if changed else "Local folders saved (no change).")
         conn.commit()
     except sqlite3.Error:
         conn.rollback()

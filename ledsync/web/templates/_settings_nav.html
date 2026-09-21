@@ -1,0 +1,4 @@
+<nav class="subnav" aria-label="Settings sections">
+  <a href="{{ url_for('settings.cloud') }}"{% if section == 'cloud' %} aria-current="page" class="active"{% endif %}>Cloud Storage</a>
+  <a href="{{ url_for('settings.folders') }}"{% if section == 'folders' %} aria-current="page" class="active"{% endif %}>Local Folders</a>
+</nav>

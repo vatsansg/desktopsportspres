@@ -34,6 +34,7 @@ RETRY_TOTAL = 1              # one retry: an offline venue must fail in seconds,
 YEAR_CONTAINER_RE = re.compile(r"[0-9]{4}")
 MAX_TOP_LEVEL_FOLDERS = 20000
 _UNSAFE_PATH = re.compile(r"[\x00-\x1f\x7f\\]")
+_ASCII_LOWER = {ord(c): ord(c) + 32 for c in "ABCDEFGHIJKLMNOPQRSTUVWXYZ"}
 
 
 class StorageError(Exception):
@@ -199,6 +200,57 @@ class AzureReadOnlyStorage:
                 f"More than one folder in container {container} starts with '{event_id} - '. "
                 "The event cannot be identified; ask the web application administrator to check the storage.")
         return EventLocation(container, folders[0])
+
+    # --- locating a file whose path is written in another letter case ----------------------------
+    def resolve_relative_path(self, location: EventLocation, relative_path: str, cache: dict | None = None) -> str:
+        """The REAL path (inside the event folder) of a file the change log names in any A-Z letter
+        case: the log says `RPI/HOME_Look.png` while Azure holds `rpi/HOME_Look.png`, and Azure blob
+        names are case-sensitive. Each level is looked up by listing (a read), never guessed.
+        `cache` (one dict per run) keeps each folder's listing so many files cost few calls.
+        Raises StorageError if nothing matches or if two different files match (ambiguous)."""
+        location.blob_path(relative_path)                              # validates the path
+        wanted = relative_path.split("/")
+        cache = {} if cache is None else cache
+        frontier = [location.folder + "/"]                            # every real spelling that fits so far
+        try:
+            for depth, part in enumerate(wanted):
+                is_file = depth == len(wanted) - 1
+                folded = part.translate(_ASCII_LOWER)
+                found = []
+                for prefix in frontier:
+                    for leaf, is_folder in self._listing(location.container, prefix, cache):
+                        if is_folder != is_file and leaf.translate(_ASCII_LOWER) == folded:
+                            found.append(prefix + leaf + ("" if is_file else "/"))
+                if not found:
+                    raise StorageError(exceptions.MISSING_FOLDER,
+                                       f"The file {relative_path} was not found in the event folder.")
+                frontier = found
+            if len(frontier) > 1:
+                raise StorageError(exceptions.CONFIGURATION,
+                                   f"More than one file in the event folder matches {relative_path} apart from "
+                                   "letter case, so it was not used. Ask the web application administrator to rename one.")
+        except StorageError:
+            raise
+        except Exception as exc:                                       # noqa: BLE001
+            raise map_error(exc, f"looking for {relative_path}") from None
+        return frontier[0][len(location.folder) + 1:]
+
+    def _listing(self, container: str, prefix: str, cache: dict) -> list:
+        """(name, is_folder) for everything directly inside `prefix`, listed once per cache."""
+        key = (container, prefix)
+        if key not in cache:
+            entries = []
+            for item in self._service.get_container_client(container).walk_blobs(name_starts_with=prefix, delimiter="/"):
+                name = getattr(item, "name", "")
+                if not name.startswith(prefix):
+                    continue
+                leaf = name[len(prefix):]
+                folder = leaf.endswith("/")
+                leaf = leaf[:-1] if folder else leaf
+                if leaf and "/" not in leaf:
+                    entries.append((leaf, folder))
+            cache[key] = entries
+        return cache[key]
 
     # --- downloading -----------------------------------------------------------------------------
     def read_blob(self, location: EventLocation, relative_path: str, max_bytes: int) -> bytes:

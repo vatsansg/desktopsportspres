@@ -8,6 +8,7 @@
   <p class="alert alert-{{ category }}" role="status">{{ message }}</p>
   {% endfor %}
   <h1>Settings</h1>
+  {% set section = 'cloud' %}{% include "_settings_nav.html" %}
   <h2 class="settings-section">Cloud Storage</h2>
   <p class="lede">The Azure Storage account the web application uploads to. This application only ever <strong>reads</strong> from it.</p>
 

@@ -35,6 +35,29 @@ def cloud():
     return render_template("settings_cloud.html", **_view_model(cs.load_cloud(get_db())))
 
 
+@bp.get("/folders")
+@login_required
+def folders():
+    saved = cs.load_rpi_folder(get_db(), current_app.config["LEDSYNC"].data_dir)
+    return render_template("settings_folders.html", **_ctx(folder=saved, typed=saved.saved))
+
+
+@bp.post("/folders")
+@login_required
+def folders_post():
+    db = get_db()
+    data_dir = current_app.config["LEDSYNC"].data_dir
+    typed = request.form.get("rpi_folder", "")[:1000]
+    try:
+        changed = cs.save_rpi_folder(db, typed, data_dir)
+    except cs.SettingsError as err:
+        return render_template("settings_folders.html", **_ctx(folder=cs.load_rpi_folder(db, data_dir), typed=typed,
+                                                                error=str(err))), 400
+    flash("Local folder settings saved." if changed else "Nothing changed \u2014 the settings were already saved.",
+          "success" if changed else "info")
+    return redirect(url_for("settings.folders"))
+
+
 @bp.post("/cloud")
 @login_required
 def cloud_post():
