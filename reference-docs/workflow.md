@@ -200,7 +200,7 @@ Status values: `Not started` / `In progress` / `Awaiting user go-ahead` / `Compl
 | 3 | Complete | 21 Sep 2026 | `8cb2c81` + `1369bac` (merge `6405679`) |
 | 4 | Complete | 21 Sep 2026 | `cdc9aa8`, `35bb338`, `f03586e` (merge `2efaafe`) |
 | 5 | Complete | 21 Sep 2026 | `6cf6b79`, `840ee2e`, `11f42dd` (merge `7907ba3`) |
-| 6 | Built — awaiting owner test | | |
+| 6 | Complete | 21 Sep 2026 | `99de658`, `2b0fa10`, `efbef49`, `caf4c39`, `8e6a8b8` (merge `9293a99`) |
 | 7 | Not started | | |
 | 8 | Not started | | |
 | 9 | Not started | | |
