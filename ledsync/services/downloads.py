@@ -215,7 +215,8 @@ def run_job(config, storage_factory, settings, event_id: str, progress: Progress
                 lines.append(_line("error", str(err)))
             progress.identify(len(items))
             progress.set_phase("Synchronising", len(items))
-            sresult = sync.process(conn, event_id, items, config.data_dir, progress, checker)
+            protected = (str(asset_folder), str(cloud_settings.load_rpi_folder(conn, config.data_dir).effective))
+            sresult = sync.process(conn, event_id, items, config.data_dir, progress, checker, protected)
             sresult.unmapped = unmapped
             cancelled = cancelled or sresult.cancelled
             lines += _describe_sync(sresult)

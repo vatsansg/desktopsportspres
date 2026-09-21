@@ -80,9 +80,16 @@ def plan(conn: sqlite3.Connection, event_id: str, asset_event_dir) -> tuple[list
         latest[(r["table_number"], led, r["file_name"].translate(_ASCII_LOWER))] = (
             r["table_number"], led, r["file_name"], r["status"], r["download_timestamp"] or "")
     synced: dict = {}
+    ours: set = set()                                           # destinations where WE put a file and have not since removed it
     for r in conn.execute("SELECT destination, status, sync_timestamp FROM sync_history WHERE event_id = ? COLLATE NOCASE "
                           "ORDER BY sync_id", (event_id,)):
-        synced[os.path.normcase(r["destination"] or "")] = (r["status"], r["sync_timestamp"] or "")
+        key = os.path.normcase(r["destination"] or "")
+        synced[key] = (r["status"], r["sync_timestamp"] or "")
+        if r["status"] == "Success":
+            ours.add(key)
+        elif r["status"] == "Deleted":
+            ours.discard(key)
+    shared: dict = {}
 
     items: list[SyncItem] = []
     unmapped: set[str] = set()
@@ -94,17 +101,40 @@ def plan(conn: sqlite3.Connection, event_id: str, asset_event_dir) -> tuple[list
             if status == "Success":
                 unmapped.add(m.label)
             continue
-        last = synced.get(os.path.normcase(os.path.join(m.shared_folder, name)))
+        key = os.path.normcase(os.path.join(m.shared_folder, name))
+        last = synced.get(key)
         if status == "Success":
             if last is None or last[0] != "Success" or last[1] < downloaded_at:
                 source = (Path(asset_event_dir) / f"Table {table}" / structure.LED_LABELS[led] / name
                           if asset_event_dir is not None else None)
                 items.append(SyncItem(m, table, led, name, PUSH, source))
-        elif last is not None and last[0] == "Success":         # removed in the cloud, and WE put it on the device
-            items.append(SyncItem(m, table, led, name, REMOVE, None))
+        elif key in ours:                                       # removed in the cloud, and WE put it on the device
+            if m.mapping_id not in shared:
+                shared[m.mapping_id] = _folder_is_shared(conn, m)
+            if not shared[m.mapping_id]:                        # another LED or event uses this folder: never remove from it
+                items.append(SyncItem(m, table, led, name, REMOVE, None))
     order = {t: i for i, t in enumerate(structure.LED_TYPES)}
     items.sort(key=lambda i: (i.table, order.get(i.led_type, 9), i.file_name.casefold()))
     return items, sorted(unmapped)
+
+
+def _folder_is_shared(conn: sqlite3.Connection, mapping: mappings.Mapping) -> bool:
+    """True if any other mapping (of any event) points at the same folder: a file there may belong to that mapping."""
+    mine = mappings.folder_key(mapping.shared_folder)
+    for r in conn.execute("SELECT mapping_id, shared_folder FROM led_mappings WHERE enabled = 1 AND shared_folder != '' "
+                          "AND mapping_id != ?", (mapping.mapping_id,)):
+        if mappings.folder_key(r["shared_folder"]) == mine:
+            return True
+    return False
+
+
+def latest_outcomes(conn: sqlite3.Connection, event_id: str) -> dict:
+    """The latest recorded outcome for every device path (normalised): {path: 'Success' | 'Failure' | 'Deleted'}."""
+    latest: dict = {}
+    for r in conn.execute("SELECT destination, status FROM sync_history WHERE event_id = ? COLLATE NOCASE ORDER BY sync_id",
+                          (event_id,)):
+        latest[os.path.normcase(r["destination"] or "")] = r["status"]
+    return latest
 
 
 def _record(conn, event_id, item: SyncItem, status: str, message: str = "") -> None:
@@ -137,23 +167,27 @@ def _retry(action):
         return action()
 
 
-def process(conn: sqlite3.Connection, event_id: str, items: list[SyncItem], data_dir, progress=None, checker=None) -> SyncResult:
-    """Carry out `items`. Every destination is tested first; a destination that cannot be used fails only its own files."""
+def process(conn: sqlite3.Connection, event_id: str, items: list[SyncItem], data_dir, progress=None, checker=None,
+            protected=()) -> SyncResult:
+    """Carry out `items`. Every destination is tested first; a destination that cannot be used fails only its own files.
+    `protected` are folders no device folder may overlap (the local asset and RPI folders)."""
     progress = progress or NullProgress()
     result = SyncResult()
     if not items:
         return result
     involved = {i.mapping.mapping_id: i.mapping for i in items}
     outcomes = (checker or connectivity.check_many)({mid: m.shared_folder for mid, m in involved.items()},
-                                                    forbidden_roots=(data_dir,))
+                                                    forbidden_roots=(data_dir, *[p for p in protected if p]))
     usable: set[int] = set()
     for mid, m in involved.items():
         check = outcomes[mid]
         if check.ok:
             try:
-                localfiles.check_destination(m.shared_folder, data_dir)
+                localfiles.check_destination(m.shared_folder, data_dir, protected)
                 usable.add(mid)
-            except localfiles.DeviceError as err:
+            except localfiles.LocalFileError as err:
+                if not isinstance(err, localfiles.DeviceError):
+                    err = localfiles.DeviceError(exceptions.NETWORK_DEVICE, str(err))
                 check = connectivity.CheckResult(False, str(err), err.category)
         try:
             mappings.record_test(conn, m, check.ok and mid in usable, check.message, check.category, check.warning)
@@ -189,14 +223,16 @@ def process(conn: sqlite3.Connection, event_id: str, items: list[SyncItem], data
                         item.source, folder, item.file_name, on_bytes=progress.add_bytes, cancelled=lambda: progress.cancelled))
                     _record(conn, event_id, item, "Success")
                     oplog.add(conn, OPERATION, "Success", f"{item.mapping.label}: sent {item.file_name}.", event_id)
-                    result.pushed += 1
-                    progress.tally_synchronised()
                 else:
                     localfiles.delete_file(folder, item.file_name)
                     _record(conn, event_id, item, "Deleted")
                     oplog.add(conn, OPERATION, "Success", f"{item.mapping.label}: removed {item.file_name}.", event_id)
-                    result.removed += 1
                 conn.commit()
+                if item.action == PUSH:
+                    result.pushed += 1
+                    progress.tally_synchronised()
+                else:
+                    result.removed += 1
                 ok = True
             except localfiles.Cancelled:
                 conn.rollback()

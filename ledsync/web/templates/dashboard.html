@@ -42,7 +42,7 @@
             <td class="nowrap">
               <form method="post" action="{{ url_for('sync.start', event_id=e.event_id) }}" class="inline-form" novalidate data-busy-text="STARTING…">
                 <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
-                <button type="submit" class="btn btn-secondary btn-sm" data-busy-label="Starting…" aria-label="Download and sync event {{ e.event_id }}">Download &amp; Sync</button>
+                <button type="submit" class="btn btn-secondary btn-sm" data-busy-label="Starting…" aria-label="Download &amp; Sync event {{ e.event_id }}">Download &amp; Sync</button>
               </form>
             </td>
           </tr>
@@ -63,9 +63,9 @@
     <h2 id="ops-heading">Operation Status</h2>
     {% if operations %}
     {% for op in operations %}
-    <div class="panel op" data-event="{{ op.event_id }}" role="status" aria-live="polite">
+    <div class="panel op" data-event="{{ op.event_id }}">
       <p><strong>Event {{ op.event_id }}</strong> &middot; <span class="op-phase">{{ op.phase or "Working" }}</span></p>
-      <p class="op-text">Working…</p>
+      <p class="op-text" role="status" aria-live="polite">Working…</p>
       <p class="op-counts hint">Identified {{ op.identified }} &middot; Downloaded {{ op.downloaded }} &middot; Synchronised {{ op.synchronised }} &middot; Errors {{ op.errors }}</p>
       <progress class="op-bar" max="100" value="{{ op.percent }}" aria-label="Progress of the current file">{{ op.percent }}%</progress>
       <form method="post" action="{{ url_for('sync.cancel', event_id=op.event_id) }}" novalidate>

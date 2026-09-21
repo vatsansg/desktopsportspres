@@ -179,9 +179,27 @@ Status values: `Not started` / `In progress` / `Awaiting user go-ahead` / `Compl
   4. **RPI files in a sub-folder per event** (owner) — replaces the flat RPI folder from Phase 6.
   5. Carried: QA F-51 (an Azure-only file overwritten without a log entry is not re-downloaded), F-52 (no overall time limit on a stalled network write; `Content-Encoding` blobs unverified), F-53 (summary shown once), F-54, **F-55 (nothing is pushed to LED yet — Phase 8)**.
 
-## Phase 8 — Push / Synchronise to LED Devices
-- **Status:** Not started
-- **Completed on:** / **What was built:** / **QA Test Case doc:** / **Security Checklist:** / **Deviations:**
+## Phase 8 - Push / Synchronise to LED Devices
+- **Status:** Built, reviewed and validated; **awaiting the owner's go-ahead** (manual steps TC-M01 - TC-M15 in the QA doc not yet run by the owner)
+- **Includes:** Step 8.1 push downloaded files to the mapped shared folders, Step 8.2 the end-to-end **Download & Sync** from the Dashboard with Operation Status, automatic event status, Sync Status in the local change log.
+- **Completed on:** 21 September 2026 (build); merge pending go-ahead
+- **What was built:**
+  - `services/sync.py`: `plan()` (database only) decides what to push or remove; `process()` tests every device first, copies each file, records `sync_history` (destination = full device path), audit and exception rows; one bad device fails only its own files (a network failure leaves the rest of that device untried); one retry per file.
+  - `localfiles.push_file`: copy to a hidden temporary name on the device, fsync, **read back size + MD5**, then move over the name; a same-named file is replaced; the device folder is never created; watched copy (no progress for 60 s = network failure, abandoned copy tidies itself). `check_destination`: identity-based refusal of the data folder, its parents, OS folders, drive roots and, after review, **the local asset and RPI folders**.
+  - Removals only for files this application pushed (and not since removed), never from a folder another mapping uses.
+  - `services/eventstatus.py`: Registered / Ready / Synced / Attention needed computed from real state after mapping changes, tests, downloads and syncs.
+  - `services/downloads.run_job`: fresh check, download, then push (a stopped or cancelled download does not start the push); `views_sync.py` routes (Download & Sync, push only, cancel, `/operations/progress`); Dashboard **Actions** column and **Operation Status** (counters Identified / Downloaded / Synchronised / Errors, bar, Cancel); Change Log page **Sync To LED Devices (N)**; `_localchangelog.csv` Sync Status filled.
+  - **Validated against the real account (read-only):** the whole real Event 1000 through the Dashboard: **76 downloaded, 75 pushed to four scratch device folders, 0 failed, status Synced, about 85 s**; a real selection compared with Azure's size and MD5 on the devices. Re-run after the review fixes.
+  - 1375 automated tests pass plus the live tests.
+- **QA Test Case doc:** `docs/QA_Desktop_Phase8_PushToLEDDevices.md` - 43 cases: 28 passed (automated, 2 live, 1 rendered-page), 15 manual (TC-M01 - TC-M15) for the owner; includes the step-by-step real-app guide.
+- **Security Checklist:** `docs/Security_Desktop_Phase8_PushToLEDDevices.md`
+- **Independent architect review:** **Approved with notes after fixes** - one blocker and seven fix-now findings reproduced and fixed (device folder overlapping the local asset folder could let a push overwrite and a removal delete the downloaded originals; a device-check timeout aborted the whole run; a failed removal never retried and stuck the status; status could not clear after a folder change; a stalled copy froze the run; removals from a shared folder; Synced with an unmapped LED; Operation Status accessibility). 11 regression tests; **not re-reviewed**.
+- **`ralph-loop` / `wtt-brand`:** applied to the new Dashboard sections (one orange action per screen; bordered controls; polite live region on the status line only).
+- **Deviations / owner decisions:**
+  1. **Remove from a device only files this application pushed; verify by size + MD5 read back; replace a same-named file we did not put there; status computed automatically** (owner, 21 Sep 2026).
+  2. **Venue login = the Windows account the application runs under; nothing stored** (owner, 21 Sep 2026).
+  3. RPI files stay on this computer (not pushed to a Table/LED device) - my default; tell me if wrong.
+  4. Carried: F-56 (devices are not watched), F-59 - F-62 (removal not re-verified, same-second re-download, old folder after a mapping change, one failure row per file), F-58 (no real SMB share tested), F-51/F-53.
 
 ## Phase 9 — Error Handling, Exception Log, Application Log
 - **Status:** Not started

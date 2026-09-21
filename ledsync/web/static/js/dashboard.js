@@ -12,7 +12,10 @@
   }
   function tick() {
     fetch(box.getAttribute("data-url"), { credentials: "same-origin", headers: { "Accept": "application/json" } })
-      .then(function (r) { return r.json(); })
+      .then(function (r) {
+        if (!r.ok) { window.location.reload(); throw new Error("signed out"); }      // the login page takes over
+        return r.json();
+      })
       .then(function (data) {
         var jobs = data.jobs || [];
         if ((jobs.length > 0) !== initial) { window.location.reload(); return; }
@@ -25,11 +28,12 @@
             panel.querySelector(".op-phase").textContent = op.phase || "Working";
             last[op.event_id] = text;
           }
-          panel.querySelector(".op-counts").textContent = "Identified " + op.identified + " \u00b7 Downloaded " + op.downloaded +
+          var counts = "Identified " + op.identified + " \u00b7 Downloaded " + op.downloaded +
             " \u00b7 Synchronised " + op.synchronised + " \u00b7 Errors " + op.errors;
+          var countsBox = panel.querySelector(".op-counts");
+          if (countsBox.textContent !== counts) { countsBox.textContent = counts; }
           var bar = panel.querySelector(".op-bar");
-          bar.value = op.percent;
-          bar.setAttribute("aria-valuetext", op.percent + "% of " + (op.current || "the current file"));
+          if (bar.value !== op.percent) { bar.value = op.percent; }
         });
         setTimeout(tick, initial ? 1000 : 3000);
       })

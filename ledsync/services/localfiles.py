@@ -27,7 +27,7 @@ import time
 import uuid
 from pathlib import Path
 
-from . import mappings
+from . import exceptions, mappings
 from .changelog import _path_problem, blocked_name_problem
 
 REPARSE_POINT = 0x400        # FILE_ATTRIBUTE_REPARSE_POINT: junctions and symbolic links
@@ -361,17 +361,42 @@ def missing_files(folder: Path, names, timeout: float = 5.0) -> set | None:
 
 # --- pushing a file to a LED device's shared folder ---------------------------------------------------------------------
 
-def check_destination(folder, data_dir) -> Path:
+def _overlaps(a: Path, b: Path) -> bool:
+    """True if folder `a` is, contains or is inside folder `b`, judged by file identity (aliases, junctions, 8.3 names)."""
+    for x, y in ((a, b), (b, a)):
+        for folder in (x, *x.parents):
+            if _same(folder, y):
+                return True
+    return False
+
+
+def check_destination(folder, data_dir, protected=()) -> Path:
     """The device folder must exist, be a plain folder, and not be (or alias) the application's data folder, a folder
-    containing it, a drive root or an operating-system folder - judged by file identity. It is NEVER created here."""
+    containing it, a drive root or an operating-system folder - judged by file identity. It must also not overlap a
+    `protected` folder (the local asset or RPI folder: a push into those would overwrite the downloaded originals).
+    It is NEVER created here. Every failure is a DeviceError so that one bad device cannot stop the others."""
     def check():
         path = Path(folder)
         if not path.is_dir():
             raise DeviceError("Missing folder", "The device folder does not exist or is not available.")
-        if _unsafe_root(path, Path(os.path.realpath(path)), data_dir):
+        real = Path(os.path.realpath(path))
+        if _unsafe_root(path, real, data_dir):
             raise DeviceError("Configuration", "That device folder is reserved for the operating system or this application.")
+        for other in protected:
+            if other and _overlaps(real, Path(os.path.realpath(other))):
+                raise DeviceError("Configuration", "That device folder overlaps the folder where downloaded files are kept. "
+                                                   "Choose a separate folder for the device.")
+        try:
+            _sweep_stale_temporaries(real)
+        except OSError:
+            pass
         return path
-    return run_limited(check, FOLDER_TIMEOUT)
+    try:
+        return run_limited(check, FOLDER_TIMEOUT)
+    except DeviceError:
+        raise
+    except (LocalFileError, OSError):
+        raise DeviceError(exceptions.NETWORK_DEVICE, "The device folder did not respond. Check that it is available.") from None
 
 
 def _device_error(err: OSError, doing: str) -> DeviceError:
@@ -380,7 +405,7 @@ def _device_error(err: OSError, doing: str) -> DeviceError:
     return DeviceError(result.category or "File access", result.message)
 
 
-def push_file(source, dest_dir, name: str, *, on_bytes=None, cancelled=None) -> Path:
+def _push_file(source, dest_dir, name: str, on_bytes, cancelled, beat) -> Path:
     """Copy `source` (a file in the local asset folder) into the device folder as `name`.
 
     The copy is built under a hidden temporary name on the device, flushed, then READ BACK and compared with the source
@@ -417,6 +442,7 @@ def push_file(source, dest_dir, name: str, *, on_bytes=None, cancelled=None) -> 
                 copied += len(chunk)
                 if on_bytes is not None:
                     on_bytes(len(chunk))
+            beat()
             writing.flush()
             try:
                 os.fsync(writing.fileno())
@@ -436,6 +462,7 @@ def push_file(source, dest_dir, name: str, *, on_bytes=None, cancelled=None) -> 
                 if not chunk:
                     break
                 back.update(chunk)
+                beat()
         if back.digest() != source_md5.digest():
             raise IntegrityError("The copy on the device did not match the original (checksum), so it was discarded.")
         run_limited(lambda: os.replace(temp, target), 30.0)
@@ -450,3 +477,46 @@ def push_file(source, dest_dir, name: str, *, on_bytes=None, cancelled=None) -> 
         _quiet_remove(temp)
         raise _device_error(err, "sending the file") from None
     return target
+
+
+STALL_SECONDS = 60.0            # a copy that makes no progress for this long is abandoned (a dead network share)
+
+
+def push_file(source, dest_dir, name: str, *, on_bytes=None, cancelled=None) -> Path:
+    """Copy `source` into the device folder as `name` (see `_push_file`). The copy runs on its own thread and is watched:
+    if the device stops responding (no progress for STALL_SECONDS) the copy is abandoned with a network error instead of
+    freezing the run, and the abandoned thread removes its temporary file if it ever wakes up."""
+    state = {"beat": time.monotonic(), "abandoned": False}
+
+    def beat():
+        state["beat"] = time.monotonic()
+
+    def counted(n):
+        beat()
+        if on_bytes is not None:
+            on_bytes(n)
+
+    def stop():
+        return state["abandoned"] or (cancelled is not None and cancelled())
+
+    box: dict = {}
+
+    def work():
+        try:
+            box["value"] = _push_file(source, dest_dir, name, counted, stop, beat)
+        except BaseException as err:                                   # noqa: BLE001 - handed back below
+            box["error"] = err
+
+    thread = threading.Thread(target=work, name="device-copy", daemon=True)
+    thread.start()
+    while True:
+        thread.join(0.2)
+        if not thread.is_alive():
+            break
+        if time.monotonic() - state["beat"] > STALL_SECONDS:
+            state["abandoned"] = True
+            raise DeviceError(exceptions.NETWORK_DEVICE, "The device stopped responding while the file was being copied. "
+                                                      "Check that it is available.")
+    if "error" in box:
+        raise box["error"]
+    return box["value"]

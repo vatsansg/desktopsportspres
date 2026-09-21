@@ -327,8 +327,7 @@ def test_a_device_that_cannot_be_reached_only_fails_its_own_files(world, cfg):
     result = run(conn, assets, cfg)
     assert (result.pushed, result.failed) == (1, 1) and result.unreachable == ["Table 1 Outer"]
     assert (devices["t1i"] / "a.png").exists()
-    assert [(r["file_name"], r["status"]) for r in sync_rows(cfg)] == [("b.png", "Failure"), ("a.png", "Success")] or \
-        sorted((r["file_name"], r["status"]) for r in sync_rows(cfg)) == [("a.png", "Success"), ("b.png", "Failure")]
+    assert sorted((r["file_name"], r["status"]) for r in sync_rows(cfg)) == [("a.png", "Success"), ("b.png", "Failure")]
     assert [m.status for m in mappings.list_mappings(conn, "1000") if m.table_number == 1 and m.led_type == "Outer"] == ["Connection Failed"]
     ex = db_rows(cfg, "SELECT category, operation FROM exception_log")
     assert ex and ex[0]["operation"] == "Test Connection"                              # one exception for the dead device, not one per file
@@ -704,13 +703,17 @@ def test_a_second_start_while_running_is_refused(ev, cfg, tmp_path_factory):
 def test_cancel_from_the_dashboard_stops_the_running_job(ev):
     registry = ev.application.extensions["ledsync.jobs"]
     gate = threading.Event()
-    job = registry.start("1000", lambda p: (gate.wait(10), [])[1])
+    def work(progress):
+        while not progress.cancelled and not gate.wait(0.05):          # a job that stops when it is cancelled
+            pass
+        return [{"level": "info", "text": "stopped"}]
+    job = registry.start("1000", work)
     try:
         ev.post("/events/1000/sync/cancel", data={"csrf_token": tok(ev)})
-        assert job.progress.cancelled
+        job.thread.join(5)
+        assert job.progress.cancelled and not job.thread.is_alive() and not registry.running("1000")
     finally:
         gate.set()
-        job.thread.join(5)
 
 
 def test_the_change_log_page_shows_the_sync_section_and_unmapped_leds(ev, cfg, tmp_path_factory):
@@ -730,5 +733,7 @@ def test_only_reads_azure_and_never_writes_outside_the_chosen_folders(ev, cfg, t
     assert set(azure_of(ev).calls) <= {"list_containers", "list", "download"}
     written = {p for p in cfg.data_dir.rglob("*") if p.is_file()}
     assert not [p for p in written if p.suffix == ".ledsync-tmp"]
+    stray = [p for p in written if not any(part in p.parts for part in ("Events", "RPI")) and not p.name.startswith(("ledsync.db", "_localchangelog"))]
+    assert not stray, stray                                                # nothing is written outside the asset, RPI and record files
     for d in devices.values():
         assert not [p for p in d.iterdir() if p.name.startswith(".")]

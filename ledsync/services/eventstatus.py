@@ -11,7 +11,8 @@
 
 import sqlite3
 
-from . import mappings, structure
+from . import mappings
+
 STATUS_REGISTERED, STATUS_READY, STATUS_SYNCED, STATUS_ATTENTION = "Registered", "Ready", "Synced", "Attention needed"
 
 
@@ -28,24 +29,21 @@ def _unresolved_download_failures(conn: sqlite3.Connection, event_id: str) -> in
 _ASCII_LOWER = {ord(c): ord(c) + 32 for c in "ABCDEFGHIJKLMNOPQRSTUVWXYZ"}
 
 
-def _failed_push_destinations(conn: sqlite3.Connection, event_id: str) -> int:
-    import os
-    latest: dict = {}
-    for r in conn.execute("SELECT destination, status FROM sync_history WHERE event_id = ? COLLATE NOCASE ORDER BY sync_id",
-                          (event_id,)):
-        latest[os.path.normcase(r["destination"] or "")] = r["status"]
-    return sum(1 for status in latest.values() if status == "Failure")
-
-
 def compute(conn: sqlite3.Connection, event_id: str) -> str:
+    import os
     from . import sync                                   # local import: sync imports this module's callers
     enabled = mappings.list_mappings(conn, event_id)
-    if (_unresolved_download_failures(conn, event_id) or _failed_push_destinations(conn, event_id)
+    items, unmapped = sync.plan(conn, event_id, None)
+    latest = sync.latest_outcomes(conn, event_id)
+    # An unresolved push or removal failure is one that still needs doing: a file whose latest outcome is a Failure and
+    # that is still planned for a device folder that is currently mapped (a changed folder or a hidden LED resolves it).
+    push_failed = any(latest.get(os.path.normcase(i.destination)) == "Failure" for i in items)
+    if (_unresolved_download_failures(conn, event_id) or push_failed
             or any(m.status == mappings.STATUS_FAILED for m in enabled)):
         return STATUS_ATTENTION
-    downloaded = conn.execute("SELECT 1 FROM download_history WHERE event_id = ? COLLATE NOCASE AND status = 'Success' LIMIT 1",
-                              (event_id,)).fetchone() is not None
-    if downloaded and not sync.plan(conn, event_id, None)[0]:
+    downloaded = conn.execute("SELECT 1 FROM download_history WHERE event_id = ? COLLATE NOCASE AND status = 'Success' "
+                              "AND table_number IS NOT NULL LIMIT 1", (event_id,)).fetchone() is not None
+    if downloaded and not items and not unmapped:
         return STATUS_SYNCED
     if enabled and all(m.shared_folder and m.status == mappings.STATUS_OK for m in enabled):
         return STATUS_READY

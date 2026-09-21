@@ -61,9 +61,9 @@ Live checks (read-only, re-runnable): `.\.venv\Scripts\python -m pytest -q --liv
 
 | Total cases | Passed | Failed | Blocked | Not yet run |
 |---|---|---|---|---|
-| 42 | 27 (automated groups covering about 50 new pytest cases, 2 live checks against real Azure, 1 rendered-page group — all run by Claude) | 0 | 0 | 15 (manual TC-M01 – TC-M15, for the owner) |
+| 43 | 28 (automated groups covering about 60 new pytest cases, 2 live checks against real Azure, 1 rendered-page group — all run by Claude) | 0 | 0 | 15 (manual TC-M01 – TC-M15, for the owner) |
 
-`.\.venv\Scripts\python -m pytest -q` → **1364 passed, 13 skipped** (the skipped are the live-Azure tests, which need `--live`); `--live` → all live tests pass against real Azure (read-only).
+`.\.venv\Scripts\python -m pytest -q` → **1375 passed, 13 skipped** (the skipped are the live-Azure tests, which need `--live`); `--live` → all live tests pass against real Azure (read-only).
 
 ## Live validation against the real Azure account (read-only, 21/09/26)
 
@@ -84,7 +84,8 @@ Live checks (read-only, re-runnable): `.\.venv\Scripts\python -m pytest -q --liv
 | TC-A06 | **Local change log Sync Status** shows Success / Failure / empty per downloaded file | Pass |
 | TC-A07 | **Download & Sync through the app:** downloads then delivers to every device, RPI stays put; a second run does nothing; a dead device is reported, others get their files, status Attention needed then Synced; an LED without a device folder is named and its files stay downloaded; a download that stops early does not start the sync; push-only needs no cloud settings and never calls Azure; saving a mapping and testing keep the status current | Pass |
 | TC-A08 | **Dashboard and routes:** operations endpoint needs login and shows running jobs with counters and percent; the panel, Cancel and no-script fallback render; summary shown once; login, launch cookie and CSRF on every route; unknown event 404; a second start while running is refused; Cancel stops the job; the Change Log page shows the sync section; only Azure reads, no stray temporary files | Pass |
-| TC-A09 | Earlier phases unchanged (three earlier tests updated for the new Actions column, crash message and progress fields; Azure read-only AST guards, key isolation, CSP all pass) | Pass |
+| TC-A09 | **Independent-review regression tests (11):** a device folder overlapping (inside, equal to, or containing) the local asset folder is refused and no downloaded original is touched; saving such a folder in the page is refused; a device check that times out fails only that device; a failed removal is planned again and the status recovers; a file whose later push failed is still removed when the cloud removes it; the status recovers after a folder change; a folder shared with another mapping is never cleaned by a removal; not Synced while an LED with files has no folder; RPI-only download is not Synced; a stalled copy is abandoned with a network error and tidies its temporary file; the Operation Status announces only its status line and the button name contains its visible text. Four earlier weak tests were made real (row order, cancel actually stops the job, nothing written outside the asset/RPI/record files) | Pass |
+| TC-A10 | Earlier phases unchanged (three earlier tests updated for the new Actions column, crash message and progress fields; Azure read-only AST guards, key isolation, CSP all pass) | Pass |
 
 ## Rendered-page checks
 
@@ -97,7 +98,11 @@ Live checks (read-only, re-runnable): `.\.venv\Scripts\python -m pytest -q --liv
 | ID | Description | Severity | Status |
 |---|---|---|---|
 | F-56 | The application does not watch the devices: a file deleted from a device by hand is not re-sent (only new or changed downloads are). | Low | Accepted — design |
-| F-57 | Copies to a device have **no overall time limit** (a dead network share could hold the worker inside a write; cancel is honoured between chunks; folder operations and the final move are time-limited). | Low | Accepted |
+| F-57 | A copy has no overall time limit (large files legitimately take minutes) but is **watched**: no progress for 60 s abandons it as a network failure for that device and the abandoned copy removes its own temporary file. A cancel is honoured between chunks, or after that 60 s if the share has stalled. | Low | **Closed by review fix** |
+| F-59 | A removal deletes the plain file of that name even if someone replaced it after our push (it is not re-verified). | Low | Accepted — owner rule is "only files this app pushed" |
+| F-60 | A re-download in the **same second** as the push that follows it is not re-pushed (timestamps have one-second resolution). A push normally follows the download by more than a second. | Low | Accepted |
+| F-61 | Files this application pushed stay on the **old** device folder when a mapping is changed or an LED is hidden (removals look at the current folder only). | Low | Accepted |
+| F-62 | A dead device writes one failure row per file (up to 5,000 per run). | Info | Accepted |
 | F-58 | Real network-share (`\\venue\share`) behaviour was exercised with local folders and simulated failures; no real SMB share was available here — the owner's `C:\LED\…` folders cover the real venue layout. | Low | Accepted |
 | F-51/F-53 | Carried from Phase 7 (Azure-only file overwritten without a log entry; summary shown once). | Low | Accepted |
 | F-12 | Earlier carry-forwards (single-instance lock, log retention, migration runner) unchanged. | — | Carried forward |
@@ -106,5 +111,5 @@ Live checks (read-only, re-runnable): `.\.venv\Scripts\python -m pytest -q --liv
 
 | Role | Name | Date | Outcome |
 |---|---|---|---|
-| Independent Solution Architect review | Independent review agent (fresh context) | pending | pending |
+| Independent Solution Architect review | Independent review agent (fresh context) | 21/09/26 | **Approved with notes after fixes** — one blocker and seven "fix now" findings, all reproduced by running code and all fixed: **a device folder overlapping another LED's local asset folder let a push overwrite the downloaded originals and a cloud removal then delete them** (device folders may not overlap the asset or RPI folders any more, at save and at push time); a device check that timed out aborted the whole run instead of failing only that device; a failed removal was never retried and left the status stuck; the status could never clear after a folder change; a stalled copy froze the run (now watched, 60 s); a removal from a folder shared with another mapping (or event) is refused; the event showed Synced while an LED had files but no folder (and RPI-only downloads counted); the Operation Status re-announced every second and a button's accessible name did not contain its visible text. 11 regression tests added; **the fixes were not re-reviewed** (verified by the suite and the live real-event run, re-run after the fixes: 76 downloaded, 75 pushed, 0 failed). |
 | User (Vatsan) go-ahead | Vatsan | pending | pending |

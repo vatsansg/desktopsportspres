@@ -7,6 +7,7 @@ from flask import Blueprint, abort, current_app, flash, redirect, render_templat
 
 from .. import APP_NAME, __version__
 from ..services import connectivity, eventstatus, events as event_service, mappings, registration as reg, structure
+from ..services import settings as cloud_settings
 from .app_db import get_db
 from .security import login_required
 
@@ -65,6 +66,12 @@ def _render(row, struct, status=200, posted=None, error=None):
     return render_template("event_details.html", **ctx), status
 
 
+def _forbidden(db, data_dir) -> tuple:
+    """Folders no device folder may be or sit inside: the data folder and the folders where downloads are kept (a push
+    into those would overwrite the downloaded originals)."""
+    return (data_dir, cloud_settings.load_asset_folder(db, data_dir).effective, cloud_settings.load_rpi_folder(db, data_dir).effective)
+
+
 @bp.get("/<event_id>")
 @login_required
 def details(event_id):
@@ -111,7 +118,7 @@ def save_or_test(event_id):
     data_dir = current_app.config["LEDSYNC"].data_dir
 
     try:
-        changed = mappings.save_mappings(db, row["event_id"], struct, _entries(struct), forbidden_roots=(data_dir,))
+        changed = mappings.save_mappings(db, row["event_id"], struct, _entries(struct), forbidden_roots=_forbidden(db, data_dir))
     except mappings.MappingError as err:
         return _render(row, struct, 400, posted=request.form, error=str(err))
 
@@ -146,7 +153,7 @@ def _run_tests(row, action):
         abort(400)
 
     data_dir = current_app.config["LEDSYNC"].data_dir
-    results = _checker()({m.mapping_id: m.shared_folder for m in targets}, forbidden_roots=(data_dir,))
+    results = _checker()({m.mapping_id: m.shared_folder for m in targets}, forbidden_roots=_forbidden(get_db(), data_dir))
     ok_count = 0
     for m in targets:
         result = results[m.mapping_id]
