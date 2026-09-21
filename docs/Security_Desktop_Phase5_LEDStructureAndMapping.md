@@ -17,7 +17,7 @@ Status values: **Pass**, **Fail**, **N/A at this stage**, **Accepted risk** (the
 |---|---|---|---|
 | B1 | Storage Account access key not committed and protected | **Accepted risk (owner, unchanged)** | Unchanged from Phase 4 (F-28). Phase 5 code never reads or handles the key (guard test: only `settings.py` mentions it). |
 | B2 | Accepted-risk plain-text admin credential has not expanded in scope | **Accepted risk — scope unchanged** | The new modules touch neither `admin_*` nor `cloud_*` settings; no new use of `application_settings`. |
-| B3 | Shared-folder credentials not logged | **Pass (by design: none exist)** | The application **stores, asks for and logs no shared-folder credential**. Access is whatever the running Windows account has. Tests scan the mapping, operation and exception tables for credential words. **The venue's authentication method is still an open BRD §36 item (F-33):** if devices need their own user/password, where it is stored becomes a security decision before Phase 8. |
+| B3 | Shared-folder credentials not logged | **Pass (by design: none exist)** | The application **stores, asks for and logs no shared-folder credential**. Access is whatever the running Windows account has. Tests scan the mapping, operation and exception tables for credential words. **Owner decision 21/09/26 (F-33): the venue devices are reached with the Windows login the application runs under, so no credential is ever stored.** |
 | B4 (added) | Every new page and action is behind login and the launch cookie | **Pass** | `/events/<id>` and `/events/<id>/mappings` use `login_required`; tested signed-out and without the launch cookie (403). |
 
 ## C. Network & transport
@@ -80,8 +80,8 @@ Status values: **Pass**, **Fail**, **N/A at this stage**, **Accepted risk** (the
 | S-34 | Medium → **Closed** | (Review) A test result could be written onto a folder changed while the 10-second test ran, showing an untested folder as *Connection Successful*. | Result applied only if the row still holds the tested folder; otherwise the operator is told to re-run; tested. |
 | S-35 | Low → **Closed** | (Review) A database error while saving a result gave an error page and lost the results; invisible/bidi/space-lookalike characters, `CON .txt`, `COM` + superscript digits and 200+-character paths were accepted; a removed-probe warning was not audited. | Plain message; stricter character rules (Arabic names still allowed); limit lowered to 200; warning audited. |
 | S-36 | Info | Any host is accepted as a network target, so testing a hostile UNC address would send this Windows account's credentials to it (operator-trust point); remote-share junctions cannot be resolved from here (QA F-35). | Accepted; operators enter the venue's own devices. |
-| S-30 | Medium | The test proves access for **this** Windows account only (F-32); the credentials/authentication method for venue devices is undecided (F-33). | Owner decision before Phase 8; nothing stored meanwhile. |
-| S-31 | Low | The probe is written into the real destination folder; a device that reacts to any new file might see it for an instant (F-34). | Confirm at the venue. |
+| S-30 | Low | The test proves access for **this** Windows account only (F-32). Owner decision 21/09/26: devices are reached with the Windows login the application runs under (F-33), so no credential is stored. | Closed — decided; revisit F-32 for unattended runs (Phase 12). |
+| S-31 | Low | The probe is written into the real destination folder (F-34). | Closed — owner accepted 21/09/26. |
 | S-2, S-4, S-9 | — | Accepted admin credential (scope re-verified); accepted plain-text key (F-28); single-instance lock (Phase 6/12). | Carried. |
 
 ## Sign-off
@@ -89,4 +89,4 @@ Status values: **Pass**, **Fail**, **N/A at this stage**, **Accepted risk** (the
 | Role | Name | Date | Outcome |
 |---|---|---|---|
 | Independent Solution Architect review | Independent review agent (fresh context) | 21/09/26 | **Approved with notes** — no blockers; findings S-32 – S-35 fixed and regression-tested; fixes not given a second independent pass |
-| User (Vatsan) go-ahead | Vatsan | | *pending manual test* |
+| User (Vatsan) go-ahead | Vatsan | 21/09/26 | Approved (manual test passed) |

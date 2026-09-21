@@ -63,7 +63,7 @@ Clean up: close the app, then `icacls "$env:TEMP\ledsync-shares" /reset /T` if y
 
 | Total cases | Passed | Failed | Blocked | Not yet run |
 |---|---|---|---|---|
-| 39 | 23 (14 automated groups covering 195 new pytest cases, 1 rendered-page group, 8 real-Windows checks — all run by Claude) | 0 | 0 | 16 (manual TC-M01 – TC-M16, for the owner) |
+| 39 | 39 (14 automated groups covering 195 new pytest cases, 1 rendered-page group, 8 real-Windows checks — all run by Claude; 16 manual TC-M01 – TC-M16 run by the owner on 21/09/26: "All ok") | 0 | 0 | 0 |
 
 `.\.venv\Scripts\python -m pytest -q` → **844 passed, 7 skipped** (the 7 are the live-Azure tests, which need `--live`; Phase 5 does not touch Azure).
 
@@ -110,11 +110,11 @@ Clean up: close the app, then `icacls "$env:TEMP\ledsync-shares" /reset /T` if y
 | ID | Description | Severity | Status |
 |---|---|---|---|
 | F-32 | **Test only proves what this Windows account can do.** A device that allows the operator's account but not the account used by a scheduled/unattended run (Phase 12) would pass here and fail later. | Medium | Carried to Phase 8 / 12 |
-| F-33 | **Venue shared-folder authentication method is still open (BRD §36).** Nothing is stored or logged. If venue devices need their own user name and password, that becomes a security decision (where to store it) before Phase 8. | Medium | Open — needs owner |
+| F-33 | **Venue shared-folder authentication (BRD §36).** Owner decision 21/09/26: the application uses the Windows login it runs under; no separate credential is stored, so no work is needed. | — | Closed — decided |
 | F-35 | Resolving a junction that lives **on a remote share** cannot be done from this machine, so a junction on a venue device pointing into that device's own protected folder would not be detected. Only someone with access to the device can create one. | Low | Accepted |
 | F-36 | The listing step (the folder must be listable) fails a share where listing is denied but writing is allowed. This follows the owner's chosen check order. Confirm at the venue that the LED devices' shares are listable. | Low | Open — confirm at the venue |
 | F-37 | Repeated clicks on a dead host start extra 10-second checks whose threads live until Windows gives up (about 34 s). Bounded by the operator's clicking; no effect on the rest of the application. | Info | Accepted |
-| F-34 | The probe file is written to the *real* destination folder; if the LED device watches that folder and reacts to any new file it could briefly see a file that is removed immediately. Confirm with the venue whether that is harmless. | Low | Open — confirm at the venue |
+| F-34 | The probe file is written to the *real* destination folder. Owner decision 21/09/26: no issue with the probe file being placed there. | — | Closed — accepted |
 | F-28 | Storage key stored in plain text (accepted risk, owner). | — | Carried |
 | F-29 | Real cloud naming vs BRD (change-log file name `_ledassetschangelog.csv`, lower-case cloud folders, `keepalive.txt`). Needed at Phase 6. | Info | Carried to Phase 6 |
 | F-12 | Earlier carry-forwards (single-instance lock, log retention, migration runner) unchanged. | — | Carried forward |
@@ -124,4 +124,4 @@ Clean up: close the app, then `icacls "$env:TEMP\ledsync-shares" /reset /T` if y
 | Role | Name | Date | Outcome |
 |---|---|---|---|
 | Independent Solution Architect review | Independent review agent (fresh context) | 21/09/26 | **Approved with notes** — no blockers; ran the suite and about 60 probes of its own. Four "fix now" findings reproduced and resolved: protected-folder and data-folder checks bypassed by 8.3 names, loopback admin shares and junctions; a returning hidden mapping breaking the one-folder rule; a stale test result stamped onto a changed folder; database errors giving an error page. Cheap notes also done (invisible characters, reserved names, path length, audit noise, un-removable probe audited, Back-button label, row headers). The fixes were verified by 38 new tests but did **not** get a second independent review pass. |
-| User (Vatsan) go-ahead | Vatsan | | *pending manual test* |
+| User (Vatsan) go-ahead | Vatsan | 21/09/26 | Approved — "All ok, commit and move to next phase" (venue login: uses the Windows account, no work; probe file: no issue) |
