@@ -11,6 +11,8 @@ from . import security
 from .app_db import close_db, get_db  # noqa: F401  (get_db re-exported for callers/tests)
 from .views import bp
 from .views_events import bp as events_bp
+from .views_settings import bp as settings_bp
+from ..services.storage import AzureReadOnlyStorage
 from ..services.registration import PendingReregistrations
 
 
@@ -25,6 +27,11 @@ ERROR_PAGES = {
     413: ("Request Too Large", "The information sent was too large. Go back and shorten it."),
     500: ("Something Went Wrong", "The application hit an unexpected problem. Go back and try again; if it continues, restart the application."),
 }
+
+
+def _default_storage_factory(settings):
+    """The real, read-only Azure client. Tests replace this with a fake."""
+    return AzureReadOnlyStorage(settings.account, settings.access_key)
 
 
 def create_app(config: Config) -> Flask:
@@ -49,6 +56,7 @@ def create_app(config: Config) -> Flask:
     app.config["DISPLAY_TZ"] = None
     app.extensions["ledsync.throttle"] = LoginThrottle()
     app.extensions["ledsync.pending"] = PendingReregistrations()
+    app.extensions["ledsync.storage_factory"] = _default_storage_factory
 
     @app.before_request
     def _reject_foreign_host():
@@ -62,6 +70,7 @@ def create_app(config: Config) -> Flask:
     app.teardown_appcontext(close_db)
     app.register_blueprint(bp)
     app.register_blueprint(events_bp)
+    app.register_blueprint(settings_bp)
 
     @app.errorhandler(400)
     @app.errorhandler(403)

@@ -1,14 +1,15 @@
 """Event registration routes (BRD Sections 8 and 9): Add New Event and Re-register."""
 
 import hmac
-from pathlib import PureWindowsPath
 
 from flask import (
     Blueprint, current_app, flash, redirect, render_template, request, session, url_for,
 )
 
 from .. import APP_NAME, __version__
+from ..services import cloud, exceptions, settings as cloud_settings
 from ..services import registration as reg
+from ..services.storage import StorageError
 from .app_db import get_db
 from .security import login_required
 
@@ -27,26 +28,20 @@ def _pending() -> reg.PendingReregistrations:
     return current_app.extensions["ledsync.pending"]
 
 
-def source_label(filename: str | None) -> str:
-    """Where the configuration came from, for the record. The client-supplied file name is
-    untrusted, so only a sanitised base name is kept."""
-    name = PureWindowsPath(filename or "").name
-    name = "".join(c if (c.isalnum() or c in "._- ") else "_" for c in name)[:100].strip()
-    return f"Local test file: {name}" if name else "Local test file"
-
-
-def _read_upload() -> tuple[bytes, str]:
-    upload = request.files.get("config_file")
-    if upload is None or not upload.filename:
-        raise reg.InputError("Choose the event's _GUID.json file.")
-    data = upload.stream.read(reg.MAX_CONFIG_BYTES + 1)
-    return data, source_label(upload.filename)
+def _storage(settings):
+    """The read-only Azure client. A factory on the app so tests can supply a fake."""
+    return current_app.extensions["ledsync.storage_factory"](settings)
 
 
 @bp.get("/new")
 @login_required
 def new():
-    return render_template("event_new.html", **_ctx(entered_id=""))
+    return render_template("event_new.html", **_ctx(entered_id="",
+                                                    needs_settings=not cloud_settings.load_cloud(get_db()).configured))
+
+
+NOT_CONFIGURED = ("Cloud storage is not set up yet. Open Settings and enter the storage account name "
+                  "and access key first.")
 
 
 @bp.post("/new")
@@ -55,28 +50,38 @@ def new_post():
     db = get_db()
     entered = request.form.get("event_id", "")
     event_id = None
+    settings = None
     source = None
     try:
         event_id = reg.validate_event_id_input(entered)
-        data, source = _read_upload()
-        config = reg.parse_event_config(data)
+        settings = cloud_settings.load_cloud(db)
+        if not settings.configured:
+            raise reg.InputError(NOT_CONFIGURED)
+        source = f"Azure Storage: {settings.account}"      # refined to the exact blob address once it is found
+        fetched = cloud.fetch_event_config(_storage(settings), settings, event_id)
+        config, source = fetched.config, fetched.source
         outcome = reg.register_event(db, event_id, config, source)
     except reg.GuidMismatch as err:
         reg.log_rejection(db, err, "Register Event", event_id, source)
-        # Keep the rejected file server-side (briefly) so the operator can confirm the new
-        # GUID. Any earlier pending request from this session is dropped, never orphaned.
+        # Keep the downloaded configuration server-side (briefly) so the operator can confirm the
+        # new GUID. Any earlier pending request from this session is dropped, never orphaned.
         _pending().discard(session.get(SESSION_KEY))
-        session[SESSION_KEY] = _pending().add(event_id, config, source, err.recorded)
+        session[SESSION_KEY] = _pending().add(err.event_id, config, source, err.recorded)
         return redirect(url_for("events.reregister"))
+    except StorageError as err:
+        exceptions.record(db, err.category, "Register Event", err.message, event_id=event_id,
+                          source=f"Azure Storage: {settings.account}" if settings else None)
+        return render_template("event_new.html", **_ctx(entered_id=entered.strip()[:60], error=err.message,
+                                                        needs_settings=False)), 400
     except reg.RegistrationError as err:
         reg.log_rejection(db, err, "Register Event", event_id, source)
-        return render_template("event_new.html", **_ctx(entered_id=entered.strip()[:60],
-                                                        error=err.message)), 400
+        return render_template("event_new.html", **_ctx(entered_id=entered.strip()[:60], error=err.message,
+                                                        needs_settings=err.message == NOT_CONFIGURED)), 400
 
     if outcome == "already_registered":
         flash(f"Event {event_id} is already registered with this GUID. Nothing changed.", "info")
     else:
-        flash(f"Event {event_id} ({config.event_name}) registered.", "success")
+        flash(f"Event {config.event_id} ({config.event_name}) registered from Azure Storage.", "success")
     return redirect(url_for("views.dashboard"))
 
 

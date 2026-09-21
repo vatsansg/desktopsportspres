@@ -5,6 +5,7 @@ directory (BRD Section 14: "Database location") is a one-place change.
 """
 
 import os
+import sys
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -40,3 +41,43 @@ def load() -> Config:
     data_dir = default_data_dir()
     data_dir.mkdir(parents=True, exist_ok=True)
     return Config(data_dir=data_dir)
+
+
+# --- development-only settings from a git-ignored .env -------------------------------------
+# The Storage Account key is entered in Settings on a real venue machine. While developing
+# from source, STORAGE_ACCOUNT_NAME / STORAGE_ACCOUNT_KEY / STORAGE_CONTAINER may instead be
+# supplied by a local .env in the project root (never committed - see .gitignore) or by the
+# process environment. An installed (frozen) build never reads a .env.
+
+PROJECT_ROOT = Path(__file__).resolve().parent.parent
+DOTENV_PATH = PROJECT_ROOT / ".env"
+
+
+def read_dotenv(path: Path | None = None) -> dict[str, str]:
+    """Parse simple KEY=VALUE lines (blank lines and # comments ignored, optional quotes)."""
+    if getattr(sys, "frozen", False):
+        return {}
+    target = DOTENV_PATH if path is None else path
+    values: dict[str, str] = {}
+    try:
+        text = target.read_text(encoding="utf-8-sig")
+    except OSError:
+        return values
+    for line in text.splitlines():
+        line = line.strip()
+        if not line or line.startswith("#") or "=" not in line:
+            continue
+        name, _, value = line.partition("=")
+        name, value = name.strip(), value.strip()
+        if len(value) >= 2 and value[0] == value[-1] and value[0] in "\"'":
+            value = value[1:-1]
+        if name.replace("_", "").isalnum():
+            values[name] = value
+    return values
+
+
+def dev_setting(name: str, dotenv: dict[str, str] | None = None) -> str:
+    """A development-time value: process environment first, then the .env file."""
+    if os.environ.get(name):
+        return os.environ[name]
+    return (dotenv if dotenv is not None else read_dotenv()).get(name, "")

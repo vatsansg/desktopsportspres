@@ -1,5 +1,6 @@
 """SQLite connection and initialisation."""
 
+import logging
 import sqlite3
 from pathlib import Path
 
@@ -41,12 +42,28 @@ def init_db(db_path: Path) -> None:
                 "Install the latest application version."
             )
         conn.executescript(DDL)
+        _ensure_event_id_index(conn)
         if version == 0:
             conn.execute(f"PRAGMA user_version = {SCHEMA_VERSION}")
         conn.commit()
         _verify(conn)
     finally:
         conn.close()
+
+
+def _ensure_event_id_index(conn: sqlite3.Connection) -> None:
+    """Event IDs are case-insensitive: 'abc' and 'ABC' must never be two events (Windows
+    folders would collide). Idempotent. If an existing database somehow already holds two
+    IDs differing only by case the index cannot be built - the application still starts,
+    the registration code enforces the rule, and the problem is logged for the operator."""
+    try:
+        conn.execute("CREATE UNIQUE INDEX IF NOT EXISTS ux_events_event_id_nocase "
+                     "ON events (event_id COLLATE NOCASE)")
+        conn.commit()
+    except sqlite3.IntegrityError:
+        conn.rollback()
+        logging.getLogger("ledsync.db").warning(
+            "events already holds Event IDs that differ only by case; the uniqueness index was not created.")
 
 
 def _verify(conn: sqlite3.Connection) -> None:

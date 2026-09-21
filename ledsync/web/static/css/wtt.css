@@ -190,3 +190,7 @@ input[type="file"]::file-selector-button {
 .kv dd { margin: 0; overflow-wrap: anywhere; }
 .kv dd.mono { white-space: nowrap; overflow-wrap: normal; letter-spacing: 0.02em; }  /* a GUID must stay on ONE line to be compared by eye */
 .cancel-form { margin-top: 1rem; }
+
+.settings-section { margin: 0 0 0.5rem; }
+button:disabled { opacity: 0.6; cursor: progress; }
+a.btn-secondary[href] { text-decoration: none; }

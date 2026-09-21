@@ -18,3 +18,19 @@ document.addEventListener("DOMContentLoaded", function () {
   alertBox.setAttribute("tabindex", "-1");
   alertBox.focus();
 });
+
+// A form that talks to Azure can take several seconds: show that it is working and block a
+// double-submit. Opt-in per form via data-busy-text. (The button is disabled AFTER the browser
+// has taken the form data, otherwise a disabled submitter would not be sent.)
+document.addEventListener("submit", function (event) {
+  var form = event.target;
+  var text = form.getAttribute("data-busy-text");
+  if (!text) return;
+  var submitter = event.submitter;
+  form.setAttribute("aria-busy", "true");
+  setTimeout(function () {
+    var buttons = form.querySelectorAll('button[type="submit"]');
+    for (var i = 0; i < buttons.length; i++) { buttons[i].disabled = true; }
+    if (submitter && submitter.classList.contains("btn-primary")) { submitter.textContent = text; }
+  }, 0);
+});
