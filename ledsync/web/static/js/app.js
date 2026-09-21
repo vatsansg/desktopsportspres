@@ -31,7 +31,11 @@ document.addEventListener("submit", function (event) {
   setTimeout(function () {
     var buttons = form.querySelectorAll('button[type="submit"]');
     for (var i = 0; i < buttons.length; i++) { buttons[i].disabled = true; }
-    if (submitter && submitter.classList.contains("btn-primary")) { submitter.textContent = text; }
+    var label = submitter && submitter.getAttribute("data-busy-label");
+    if (label || (submitter && submitter.classList.contains("btn-primary"))) {
+      submitter.setAttribute("data-idle-text", submitter.textContent);
+      submitter.textContent = label || text;
+    }
   }, 0);
 });
 
@@ -42,6 +46,10 @@ window.addEventListener("pageshow", function (event) {
   for (var i = 0; i < forms.length; i++) {
     forms[i].removeAttribute("aria-busy");
     var buttons = forms[i].querySelectorAll('button[type="submit"]');
-    for (var j = 0; j < buttons.length; j++) { buttons[j].disabled = false; }
+    for (var j = 0; j < buttons.length; j++) {
+      buttons[j].disabled = false;
+      var idle = buttons[j].getAttribute("data-idle-text");
+      if (idle !== null) { buttons[j].textContent = idle; buttons[j].removeAttribute("data-idle-text"); }
+    }
   }
 });

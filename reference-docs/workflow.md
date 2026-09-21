@@ -111,8 +111,25 @@ Status values: `Not started` / `In progress` / `Awaiting user go-ahead` / `Compl
   6. Native-window keystroke automation is unreliable on this machine and a password was never typed into a browser; screens verified from rendered pages, and the owner's manual run is the true check.
 
 ## Phase 5 — LED Structure and Device Mapping
-- **Status:** Not started
-- **Completed on:** / **What was built:** / **QA Test Case doc:** / **Security Checklist:** / **Deviations:**
+- **Status:** Complete (owner's manual test passed and go-ahead given 21 September 2026; built, polished and independently reviewed the same day; merged to `main` and pushed — hashes in the table below)
+- **Includes:** LED structure from the event configuration; IP / shared-folder mapping per enabled LED; folder-access connection testing.
+- **Completed on:** 21 September 2026
+- **What was built:**
+  - **Step 5.1 — LED structure:** an **Event Details** page (click an event on the Dashboard) shows Table x Inner / Outer / Main LED exactly as exported (read-only), from the stored configuration re-parsed through the same strict parser. Canonical LED types `Inner`, `Outer`, `MainLED` (shown "Main LED"), matched case-insensitively.
+  - **Step 5.2 — mapping:** one row per enabled LED with an optional IP (validated) and a shared folder (UNC `\\host\share[\sub]` or local `X:\...`); all-or-nothing save with one audit row; forged fields/actions for LEDs that are not enabled are ignored/refused; duplicates refused; OS folders, this application's data folder, loopback/own-computer shares, 8.3 names and junctions into protected folders refused. Re-registration keeps matching mappings (status reset to *Not tested*), hides removed LEDs (listed under "Previously mapped"), adds new ones unmapped.
+  - **Step 5.3 — connection testing:** per-row **Test** and **Test All Connections** (each saves the typed entries first). The check proves the *folder*: open, list, then create-and-delete a uniquely named empty probe file (exclusive create; never overwrites). Every check runs on a time-limited thread (10 s; Test All in parallel under one deadline) so a dead device never freezes the app (raw Windows blocks ~34 s on an unroutable address). Fixed plain-language failures mapped from Windows error numbers to BRD §21 categories; results stored with local-time display, audited, and failures raised as open exceptions (table, LED, destination).
+  - **Verified on real Windows:** unresolvable host, missing share, missing local folder, unroutable address, writable folder, and the owner's real folders `C:\LED\1000\Table1_inner|outer|mainled` and `Table2_inner` (all four pass; left empty).
+  - 844 automated tests pass (Phases 0–5; 195 new) plus 7 live-Azure (Phase 5 does not touch Azure).
+- **QA Test Case doc:** `docs/QA_Desktop_Phase5_LEDStructureAndMapping.md` — 39 cases: all 39 pass (14 automated groups, 1 rendered-page, 8 real-Windows, 16 manual run by the owner: "All ok"); includes the step-by-step real-app guide.
+- **Security Checklist:** `docs/Security_Desktop_Phase5_LEDStructureAndMapping.md`
+- **Independent architect review:** **Approved with notes**, no blockers. Four fix-now findings resolved: protected-folder checks bypassed by 8.3 names, loopback admin shares and junctions (now checked on the real location at save and at every test); a returning hidden mapping breaking the one-folder rule; a stale test result written onto a folder changed during the test; database errors giving an error page. Cheap notes done (invisible/bidi characters, reserved names, path length 200, audit noise, un-removable-probe audit, Back-button label, row headers). Fixes verified by 38 new tests; no second independent pass.
+- **`ralph-loop` / `wtt-brand`:** run once on the new screen (orange only on SAVE MAPPING; bordered inputs; status badges readable on black; no horizontal scroll at 1366 px; Enter saves).
+- **Deviations / owner decisions:**
+  1. **Folder access only, no ping; write-and-delete probe file** (owner, 21 Sep 2026).
+  2. **No shared-folder credentials are stored or asked for** — the app uses the Windows account it runs under. **Owner decision (21 Sep 2026): this is the venue authentication method — no further work** (closes the BRD §36 item for Phase 8).
+  3. Event IDs `new` and `reregister` cannot be registered (they would collide with page addresses).
+  4. IP address is optional and informational; the folder decides the test.
+  5. Carried: F-32 (test proves this Windows account only; unattended runs in Phase 12), F-35 – F-37 (see QA doc). Owner (21 Sep 2026): the probe file being placed in the destination folder is fine (F-34 closed).
 
 ## Phase 6 — Change Log and Incremental Download Logic
 - **Status:** Not started
@@ -162,7 +179,7 @@ Status values: `Not started` / `In progress` / `Awaiting user go-ahead` / `Compl
 | 2 | Complete | 21 Sep 2026 | `29e54c5` + `ac03ded` (merge `8d2c25e`) |
 | 3 | Complete | 21 Sep 2026 | `8cb2c81` + `1369bac` (merge `6405679`) |
 | 4 | Complete | 21 Sep 2026 | `cdc9aa8`, `35bb338`, `f03586e` (merge `2efaafe`) |
-| 5 | Not started | | |
+| 5 | Built — awaiting owner test | | |
 | 6 | Not started | | |
 | 7 | Not started | | |
 | 8 | Not started | | |

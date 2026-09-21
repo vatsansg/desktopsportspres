@@ -417,13 +417,17 @@ def test_reregister_checks_the_event_id_matches_the_file(registered):
         reg.reregister_event(registered, "1000", new, NEW_GUID, "src")
 
 
-def test_reregister_keeps_existing_mappings_for_now(registered):
-    """Whether mappings should be kept or cleared is raised with the owner at Step 5.2."""
-    registered.execute("INSERT INTO led_mappings (event_id, table_number, led_type, shared_folder) "
-                       "VALUES ('1000', 1, 'Inner', 'X:\\\\share')")
+def test_reregister_keeps_matching_mappings_marks_them_untested_and_adds_new_ones(registered):
+    """Owner decision 21/09/26: keep matching mappings (re-checked), hide the rest, new LEDs appear unmapped."""
+    registered.execute("UPDATE led_mappings SET shared_folder = 'X:\\share', connection_status = 'Connection Successful', "
+                       "last_connection_test = '2026-09-19T10:00:00Z' WHERE table_number = 1 AND led_type = 'Inner'")
     registered.commit()
+    before = {(r["table_number"], r["led_type"]) for r in rows(registered, "SELECT * FROM led_mappings")}
+    assert before == {(1, "Inner"), (1, "Outer"), (1, "MainLED"), (2, "Inner")}      # created at first registration
     reg.reregister_event(registered, "1000", reg.parse_event_config(blob(exportGuid=NEW_GUID)), NEW_GUID, "s")
-    assert len(rows(registered, "SELECT * FROM led_mappings")) == 1
+    kept = rows(registered, "SELECT * FROM led_mappings WHERE table_number = 1 AND led_type = 'Inner'")[0]
+    assert kept["shared_folder"] == "X:\\share" and kept["enabled"] == 1
+    assert kept["connection_status"] is None and kept["last_connection_test"] is None     # -> 'Not tested'
 
 
 # --- the pending store --------------------------------------------------------------------------

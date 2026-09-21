@@ -153,7 +153,7 @@ def test_dashboard_renders_a_manually_inserted_row(app, cfg, launched):
     assert "<table" in html
     for header in ("Event ID", "Event Name", "Last Updated", "Status"):
         assert f">{header}</th>" in html
-    assert ">1000</td>" in html
+    assert ">1000</a>" in html and "/events/1000" in html
     assert "Star contender Doha" in html
     assert "08/09/26 19:45" in html                      # BRD 7.2's own example format
     assert "badge-registered" in html and ">Registered<" in html

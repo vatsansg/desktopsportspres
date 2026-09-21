@@ -12,6 +12,8 @@ from .app_db import close_db, get_db  # noqa: F401  (get_db re-exported for call
 from .views import bp
 from .views_events import bp as events_bp
 from .views_settings import bp as settings_bp
+from .views_devices import bp as devices_bp
+from ..services import connectivity
 from ..services import storage as azure_storage
 from ..services.registration import PendingReregistrations
 
@@ -52,6 +54,7 @@ def create_app(config: Config) -> Flask:
     app.extensions["ledsync.throttle"] = LoginThrottle()
     app.extensions["ledsync.pending"] = PendingReregistrations()
     app.extensions["ledsync.storage_factory"] = azure_storage.from_settings
+    app.extensions["ledsync.checker"] = connectivity.check_many
 
     @app.before_request
     def _reject_foreign_host():
@@ -66,6 +69,7 @@ def create_app(config: Config) -> Flask:
     app.register_blueprint(bp)
     app.register_blueprint(events_bp)
     app.register_blueprint(settings_bp)
+    app.register_blueprint(devices_bp)
 
     @app.errorhandler(400)
     @app.errorhandler(403)

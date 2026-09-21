@@ -230,7 +230,7 @@ FORBIDDEN_IMPORTS = ("requests", "urllib.request", "http.client", "httpx", "aioh
                      "urllib3")
 DYNAMIC_BUILTINS = {"getattr", "setattr", "delattr", "__import__", "eval", "exec", "compile", "globals", "vars"}
 # getattr is only allowed with a literal name from this list (the one exception: winreg in platform_checks.py)
-LITERAL_GETATTR_OK = {"name", "status_code", "frozen"}
+LITERAL_GETATTR_OK = {"name", "status_code", "frozen", "winerror"}
 
 # Everything storage.py may call as an attribute: the READ operations of the SDK, plus plain Python helpers.
 SDK_READ_CALLS = {"list_containers", "get_container_client", "walk_blobs", "get_blob_client", "download_blob", "readall"}

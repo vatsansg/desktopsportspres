@@ -30,8 +30,8 @@
         <tbody>
           {% for e in events %}
           <tr>
-            <td class="nowrap">{{ e.event_id }}</td>
-            <td>{{ e.event_name }}</td>
+            <td class="nowrap"><a class="row-link" href="{{ url_for('devices.details', event_id=e.event_id) }}">{{ e.event_id }}</a></td>
+            <td><a class="row-link" href="{{ url_for('devices.details', event_id=e.event_id) }}">{{ e.event_name }}</a></td>
             <td class="nowrap">{{ e.last_updated }}</td>
             <td><span class="badge badge-{{ e.status_key }}">{{ e.status }}</span></td>
           </tr>
