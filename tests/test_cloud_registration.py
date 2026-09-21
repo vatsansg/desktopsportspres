@@ -112,7 +112,7 @@ def test_registering_without_cloud_settings_explains_and_links_to_settings(app, 
 @pytest.mark.parametrize("failure,category,fragment", [
     (ServiceRequestError("no route to host secret-request-id-abc123"), "Azure Storage connectivity", "Could not reach Azure"),
     (ClientAuthenticationError("bad key secret-request-id-abc123"), "Permission", "refused the storage account key"),
-    (http_error(500), "Download", "status 500"),
+    (http_error(500), "Azure Storage connectivity", "busy or unavailable"),
 ])
 def test_azure_failures_are_explained_categorised_logged_and_never_leak(app, azure, cfg, logged_in, failure, category, fragment):
     azure.put("2026", "1000 - Star contender Doha/_GUID.json", (FILES / "1000_valid.json").read_bytes())

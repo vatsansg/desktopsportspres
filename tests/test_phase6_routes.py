@@ -227,7 +227,7 @@ def test_a_check_is_audited_with_counts_only(ev, cfg):
     check(ev)
     log = db_rows(cfg, "SELECT status, message FROM operation_log WHERE operation = 'Check Changes'")
     assert log == [{"status": "Success", "message": "1 to download, 0 to remove, 0 already processed, 0 not applicable, "
-                                                    "0 unreadable row(s) in _ledassetschangelog.csv."}]
+                                                    "0 unreadable row(s) in _ledassetschangelog.csv; 0 file(s) found in Azure but not in the change log."}]
 
 
 def test_hostile_file_names_never_reach_the_page_as_markup(ev):

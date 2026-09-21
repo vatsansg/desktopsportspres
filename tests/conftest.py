@@ -63,6 +63,7 @@ def app(cfg, azure):
     conn.close()
     application = create_app(cfg)
     application.config["ALLOWED_HOSTS"] = frozenset({"localhost"})  # Flask test client's Host
+    application.config["SYNC_JOBS"] = True                          # background downloads run inline, so tests are deterministic
     application.extensions["ledsync.storage_factory"] = lambda settings: AzureReadOnlyStorage(
         settings.account, settings.access_key, service_factory=azure.factory)
     application.extensions["test.azure"] = azure

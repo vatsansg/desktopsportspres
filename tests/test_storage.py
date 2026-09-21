@@ -153,8 +153,8 @@ SECRET = "secret-request-id-abc123"
     (ServiceResponseError("Connection aborted " + SECRET), exceptions.STORAGE_CONNECTIVITY),
     (TimeoutError("timed out " + SECRET), exceptions.STORAGE_CONNECTIVITY),
     (ConnectionResetError("reset " + SECRET), exceptions.STORAGE_CONNECTIVITY),
-    (http_error(500), exceptions.DOWNLOAD),
-    (http_error(503), exceptions.DOWNLOAD),
+    (http_error(500), exceptions.STORAGE_CONNECTIVITY),
+    (http_error(503), exceptions.STORAGE_CONNECTIVITY),
     (ResourceNotFoundError("ContainerNotFound " + SECRET), exceptions.MISSING_FOLDER),
     (http_error(404), exceptions.MISSING_FOLDER),
     (RuntimeError("something odd " + SECRET), exceptions.DOWNLOAD),
@@ -235,8 +235,9 @@ LITERAL_GETATTR_OK = {"name", "status_code", "frozen", "winerror"}
 # Everything storage.py may call as an attribute: the READ operations of the SDK, plus plain Python helpers.
 SDK_READ_CALLS = {"list_containers", "get_container_client", "walk_blobs", "get_blob_client", "download_blob", "readall"}
 PYTHON_HELPER_CALLS = {"__init__", "_containers_to_search", "_folders_for_event", "_listing", "_search",
-                       "_year_containers_newest_first", "append", "blob_path", "casefold", "compile", "endswith",
-                       "fullmatch", "getLogger", "join", "search", "split", "startswith", "translate"}
+                       "_year_containers_newest_first", "append", "astimezone", "blob_path", "casefold", "compile",
+                       "endswith", "find_blob", "fullmatch", "getLogger", "join", "min", "search", "split",
+                       "startswith", "strftime", "translate"}
 
 
 def _modules():

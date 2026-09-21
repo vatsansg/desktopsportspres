@@ -9,7 +9,7 @@
   <h1>Settings</h1>
   {% set section = 'folders' %}{% include "_settings_nav.html" %}
   <h2 class="settings-section">Local Folders</h2>
-  <p class="lede">Where files downloaded from the event's storage are saved on this computer.</p>
+  <p class="lede">Where files downloaded from the event's storage are saved on this computer. The two folders must be different, and neither can be inside the other.</p>
 
   {% if error %}
   <p id="form-error" data-focus-alert class="alert alert-error" role="alert">{{ error }}</p>
@@ -18,16 +18,28 @@
   <form method="post" action="{{ url_for('settings.folders_post') }}" class="panel" novalidate data-busy-text="WORKING…">
     <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
     <div class="field">
+      <label for="asset_folder">Asset folder</label>
+      <input id="asset_folder" name="asset_folder" type="text" value="{{ asset_typed }}" maxlength="300" autocomplete="off"
+             spellcheck="false" class="mono-input" {% if not error %}autofocus{% endif %}
+             aria-describedby="{% if error %}form-error {% endif %}asset-hint">
+      <p id="asset-hint" class="hint">Table and LED files are saved here as <span class="mono">&lt;Event ID&gt;\Table 1\Inner</span> (also
+        <span class="mono">Outer</span> and <span class="mono">Main LED</span>). Leave the box empty to use the default folder inside the
+        application data folder, or enter a full path such as <span class="mono">D:\LED\Events</span>.</p>
+    </div>
+    <div class="field">
       <label for="rpi_folder">RPI folder</label>
       <input id="rpi_folder" name="rpi_folder" type="text" value="{{ typed }}" maxlength="300" autocomplete="off"
-             spellcheck="false" class="mono-input" {% if not error %}autofocus{% endif %}
-             aria-describedby="{% if error %}form-error {% endif %}rpi-hint">
-      <p id="rpi-hint" class="hint">Files in the event's <span class="mono">RPI</span> folder are saved here. Leave the box empty to use the
-        default folder inside the application data folder. To choose your own, enter a full path such as
+             spellcheck="false" class="mono-input" aria-describedby="rpi-hint">
+      <p id="rpi-hint" class="hint">Files in the event's <span class="mono">RPI</span> folder are saved here, in a sub-folder for each
+        event (<span class="mono">&lt;Event ID&gt;\file</span>). Leave the box empty to use the default folder, or enter a full path such as
         <span class="mono">D:\LED\RPI</span> or <span class="mono">\\server\share\RPI</span>.</p>
     </div>
     <dl class="kv">
-      <dt>Files are saved to</dt>
+      <dt>Asset files go to</dt>
+      <dd class="mono">{{ asset.effective }}</dd>
+      <dt>Using</dt>
+      <dd>{% if asset.is_default %}<span class="badge badge-ready">Default folder</span>{% else %}<span class="badge badge-synced">Your folder</span>{% endif %}</dd>
+      <dt>RPI files go to</dt>
       <dd class="mono">{{ folder.effective }}</dd>
       <dt>Using</dt>
       <dd>{% if folder.is_default %}<span class="badge badge-ready">Default folder</span>{% else %}<span class="badge badge-synced">Your folder</span>{% endif %}</dd>

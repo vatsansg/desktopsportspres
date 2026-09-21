@@ -13,7 +13,7 @@ from fakes import ACCOUNT, FAKE_KEY, FakeBlobService
 from phase6_helpers import REAL_GUID_JSON, T0, T1, T2, csv_text, parsed, real_structure
 
 from ledsync.db import connect, init_db
-from ledsync.services import changelog, changes, exceptions, localfiles, mappings, rpi
+from ledsync.services import changelog, changes, exceptions, localfiles, mappings, rpi, transfer
 from ledsync.services import settings as cs
 from ledsync.services.storage import AzureReadOnlyStorage, EventLocation, StorageError
 
@@ -131,28 +131,25 @@ def run(conn, fake, rows, root, data_dir, event="1000"):
     return rpi.process(conn, storage_for(fake), ACCOUNT, LOC, event, comparison, root, data_dir)
 
 
-def test_a_second_event_does_not_overwrite_the_first_events_file(conn, fake, cfg, tmp_path_factory):
+def test_each_event_has_its_own_rpi_sub_folder_so_events_never_touch_each_others_files(conn, fake, cfg, tmp_path_factory):
     root = tmp_path_factory.mktemp("rpi")
     blob(fake, "rpi/HOME_Look.png", b"event one")
     assert run(conn, fake, [("RPI/HOME_Look.png", T1, "New")], root, cfg.data_dir, "1000").downloaded == 1
     blob(fake, "rpi/HOME_Look.png", b"event two")
-    result = run(conn, fake, [("RPI/HOME_Look.png", T1, "New")], root, cfg.data_dir, "2000")
-    assert result.downloaded == 0 and result.failed == 1 and "Event 1000 already saved" in result.failures[0]
-    assert (root / "HOME_Look.png").read_bytes() == b"event one"
+    assert run(conn, fake, [("RPI/HOME_Look.png", T1, "New")], root, cfg.data_dir, "2000").downloaded == 1
+    assert (root / "1000" / "HOME_Look.png").read_bytes() == b"event one"
+    assert (root / "2000" / "HOME_Look.png").read_bytes() == b"event two"
 
 
-def test_a_second_events_removal_leaves_the_first_events_file_alone(conn, fake, cfg, tmp_path_factory):
+def test_one_events_removal_never_touches_another_events_file(conn, fake, cfg, tmp_path_factory):
     root = tmp_path_factory.mktemp("rpi")
     blob(fake, "rpi/HOME_Look.png", b"event one")
     run(conn, fake, [("RPI/HOME_Look.png", T1, "New")], root, cfg.data_dir, "1000")
-    result = run(conn, fake, [("RPI/HOME_Look.png", T0, "New"), ("RPI/HOME_Look.png", T2, "Deleted")], root, cfg.data_dir, "2000")
-    assert result.kept == 0 and result.removed == 0                      # 2000 never had it: nothing to remove
-    local = {changes.path_key(None, "RPI", "HOME_Look.png"): changes.LocalRecord("Success", parsed([("Table 1/Inner/a.png", T0, "New")]).entries[0].timestamp)}
-    comparison = changes.compare(parsed([("RPI/HOME_Look.png", T2, "Deleted")]), real_structure(), local)
-    result = rpi.process(conn, storage_for(fake), ACCOUNT, LOC, "2000", comparison, root, cfg.data_dir)
-    assert (root / "HOME_Look.png").read_bytes() == b"event one"
-    assert result.kept == 1 and result.removed == 0
-    assert db_rows(cfg, "SELECT status FROM download_history WHERE event_id = '2000'") == [{"status": "Deleted"}]
+    blob(fake, "rpi/HOME_Look.png", b"event two")
+    run(conn, fake, [("RPI/HOME_Look.png", T1, "New")], root, cfg.data_dir, "2000")
+    result = run(conn, fake, [("RPI/HOME_Look.png", T1, "New"), ("RPI/HOME_Look.png", T2, "Deleted")], root, cfg.data_dir, "2000")
+    assert result.removed == 1
+    assert not (root / "2000" / "HOME_Look.png").exists() and (root / "1000" / "HOME_Look.png").read_bytes() == b"event one"
 
 
 def test_the_same_event_can_still_replace_its_own_file(conn, fake, cfg, tmp_path_factory):
@@ -161,7 +158,7 @@ def test_the_same_event_can_still_replace_its_own_file(conn, fake, cfg, tmp_path
     run(conn, fake, [("RPI/a.png", T0, "New")], root, cfg.data_dir)
     blob(fake, "rpi/a.png", b"two")
     assert run(conn, fake, [("RPI/a.png", T0, "New"), ("RPI/a.png", T1, "Updated")], root, cfg.data_dir).downloaded == 1
-    assert (root / "a.png").read_bytes() == b"two"
+    assert (root / "1000" / "a.png").read_bytes() == b"two"
 
 
 # --- finding 3: a file that is no longer on disk (or a changed folder) is downloaded again -----------------------------
@@ -170,12 +167,12 @@ def test_a_file_deleted_by_hand_is_downloaded_again(conn, fake, cfg, tmp_path_fa
     root = tmp_path_factory.mktemp("rpi")
     blob(fake, "rpi/a.png")
     run(conn, fake, [("RPI/a.png", T1, "New")], root, cfg.data_dir)
-    (root / "a.png").unlink()
+    (root / "1000" / "a.png").unlink()
     comparison = changes.compare(parsed([("RPI/a.png", T1, "New")]), real_structure(), changes.local_state(conn, "1000"))
     assert [i.file_name for i in rpi.rpi_items(comparison)] == []                          # the history alone says "done"
-    assert [i.file_name for i in rpi.rpi_items(comparison, root)] == ["a.png"]             # the folder says otherwise
+    assert [i.file_name for i in rpi.rpi_items(comparison, root / "1000")] == ["a.png"]    # the folder says otherwise
     assert run(conn, fake, [("RPI/a.png", T1, "New")], root, cfg.data_dir).downloaded == 1
-    assert (root / "a.png").read_bytes() == PNG
+    assert (root / "1000" / "a.png").read_bytes() == PNG
 
 
 def test_a_changed_rpi_folder_receives_the_files_again(conn, fake, cfg, tmp_path_factory):
@@ -183,7 +180,7 @@ def test_a_changed_rpi_folder_receives_the_files_again(conn, fake, cfg, tmp_path
     blob(fake, "rpi/a.png")
     run(conn, fake, [("RPI/a.png", T1, "New")], old, cfg.data_dir)
     assert run(conn, fake, [("RPI/a.png", T1, "New")], new, cfg.data_dir).downloaded == 1
-    assert (new / "a.png").exists() and (old / "a.png").exists()
+    assert (new / "1000" / "a.png").exists() and (old / "1000" / "a.png").exists()
 
 
 def test_a_file_that_is_present_or_was_removed_on_purpose_is_left_alone(conn, fake, cfg, tmp_path_factory):
@@ -192,7 +189,7 @@ def test_a_file_that_is_present_or_was_removed_on_purpose_is_left_alone(conn, fa
     run(conn, fake, [("RPI/a.png", T1, "New")], root, cfg.data_dir)
     assert run(conn, fake, [("RPI/a.png", T1, "New")], root, cfg.data_dir).total == 0                    # present: nothing to do
     run(conn, fake, [("RPI/a.png", T0, "New"), ("RPI/a.png", T2, "Deleted")], root, cfg.data_dir)      # removed in the cloud
-    assert not (root / "a.png").exists()
+    assert not (root / "1000" / "a.png").exists()
     assert run(conn, fake, [("RPI/a.png", T0, "New"), ("RPI/a.png", T2, "Deleted")], root, cfg.data_dir).total == 0   # not resurrected
 
 
@@ -249,15 +246,20 @@ def test_ordinary_names_with_a_tilde_are_still_fine(name):
 
 # --- finding 7: a connection problem ends the run at once, and a run has a size limit ------------------------------------
 
-def test_a_connection_problem_stops_the_run_instead_of_trying_every_file(conn, fake, cfg, tmp_path_factory):
+def test_a_connection_problem_stops_the_run_instead_of_trying_every_file(conn, fake, cfg, tmp_path_factory, monkeypatch):
     root = tmp_path_factory.mktemp("rpi")
     for n in "abc":
         blob(fake, f"rpi/{n}.png")
-    fake.fail_with = ServiceRequestError("no network")
+    monkeypatch.setattr(transfer, "RETRY_DELAY", 0)
+
+    def offline(what):
+        fake.calls.append(what)
+        raise ServiceRequestError("no network")
+    monkeypatch.setattr(fake, "_check", offline)
     result = run(conn, fake, [(f"RPI/{n}.png", T1, "New") for n in "abc"], root, cfg.data_dir)
     assert result.stopped and result.failed == 1 and result.remaining == 2 and result.downloaded == 0
     assert exceptions.STORAGE_CONNECTIVITY in [r["category"] for r in db_rows(cfg, "SELECT category FROM exception_log")]
-    assert len(fake.calls) == 1                                        # only the first file was tried
+    assert len(fake.calls) == 2                                        # the first file, tried twice - then the run stopped
 
 
 def test_a_missing_blob_does_not_stop_the_run(conn, fake, cfg, tmp_path_factory):
@@ -268,7 +270,7 @@ def test_a_missing_blob_does_not_stop_the_run(conn, fake, cfg, tmp_path_factory)
 
 
 def test_one_run_handles_a_limited_number_of_files_and_the_next_run_continues(conn, fake, cfg, tmp_path_factory, monkeypatch):
-    monkeypatch.setattr(rpi, "MAX_FILES_PER_RUN", 2)
+    monkeypatch.setattr(transfer, "MAX_FILES_PER_RUN", 2)
     root = tmp_path_factory.mktemp("rpi")
     names = [f"f{i}.png" for i in range(5)]
     for n in names:
@@ -279,7 +281,7 @@ def test_one_run_handles_a_limited_number_of_files_and_the_next_run_continues(co
     second = run(conn, fake, rows, root, cfg.data_dir)
     third = run(conn, fake, rows, root, cfg.data_dir)
     assert (second.downloaded, second.remaining, third.downloaded, third.remaining) == (2, 1, 1, 0)
-    assert sorted(p.name for p in root.iterdir()) == sorted(names)
+    assert sorted(p.name for p in (root / "1000").iterdir()) == sorted(names)
 
 
 def test_finding_blob_names_shares_directory_listings_across_files(fake):
@@ -313,14 +315,17 @@ def test_data_is_flushed_to_disk_before_it_takes_the_real_name(tmp_path, monkeyp
 
 def test_old_temporary_files_from_a_crash_are_swept_but_a_fresh_one_is_kept(tmp_path_factory, cfg):
     tmp_path = tmp_path_factory.mktemp("sweep")
-    old, fresh = tmp_path / ".aaa.ledsync-tmp", tmp_path / ".bbb.ledsync-tmp"
-    old.write_bytes(b"x")
-    fresh.write_bytes(b"x")
+    old, fresh = tmp_path / ("." + "a" * 32 + ".ledsync-tmp"), tmp_path / ("." + "b" * 32 + ".ledsync-tmp")
+    users = tmp_path / "my-own-file.ledsync-tmp"                        # not the exact name this application creates
+    for f in (old, fresh, users):
+        f.write_bytes(b"x")
     (tmp_path / "keep.png").write_bytes(b"x")
     two_hours_ago = time.time() - 7200
     os.utime(old, (two_hours_ago, two_hours_ago))
+    os.utime(users, (two_hours_ago, two_hours_ago))
+    localfiles._swept.clear()
     localfiles.open_root(tmp_path, cfg.data_dir)
-    assert sorted(p.name for p in tmp_path.iterdir()) == [".bbb.ledsync-tmp", "keep.png"]
+    assert sorted(p.name for p in tmp_path.iterdir()) == sorted([fresh.name, "keep.png", users.name])
 
 
 def test_a_read_only_file_gives_a_specific_message_for_write_and_delete(tmp_path):
@@ -363,16 +368,15 @@ def ev(logged_in):
     return logged_in
 
 
-def test_the_button_counts_files_missing_from_the_folder_and_says_update(ev, cfg):
+def test_the_button_counts_files_missing_from_the_folder(ev, cfg):
     az = ev.application.extensions["test.azure"]
     az.put("2026", f"{FOLDER}/rpi/HOME_Look.png", PNG)
     az.put("2026", f"{FOLDER}/_ledassetschangelog.csv", csv_text([("RPI/HOME_Look.png", T1, "New")]))
     token = lambda: csrf_from(ev, "/events/1000/changes")           # noqa: E731
     ev.post("/events/1000/changes/check", data={"csrf_token": token()})
-    ev.post("/events/1000/changes/rpi", data={"csrf_token": token()})
-    assert "No RPI files are waiting." in ev.get("/events/1000/changes").get_data(as_text=True)
-    (cfg.data_dir / "RPI" / "HOME_Look.png").unlink()
-    html = ev.get("/events/1000/changes").get_data(as_text=True)
-    assert "Update RPI Files (1)" in html
-    out = ev.post("/events/1000/changes/rpi", data={"csrf_token": token()}, follow_redirects=True).get_data(as_text=True)
-    assert "1 downloaded" in out and (cfg.data_dir / "RPI" / "HOME_Look.png").read_bytes() == PNG
+    ev.post("/events/1000/changes/download", data={"csrf_token": token()})
+    assert "Nothing is waiting to be downloaded." in ev.get("/events/1000/changes").get_data(as_text=True)
+    (cfg.data_dir / "RPI" / "1000" / "HOME_Look.png").unlink()
+    assert "DOWNLOAD FILES (1)" in ev.get("/events/1000/changes").get_data(as_text=True)
+    out = ev.post("/events/1000/changes/download", data={"csrf_token": token()}, follow_redirects=True).get_data(as_text=True)
+    assert "Downloaded 1 file(s)" in out and (cfg.data_dir / "RPI" / "1000" / "HOME_Look.png").read_bytes() == PNG

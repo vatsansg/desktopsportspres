@@ -163,9 +163,9 @@ def test_phase6_downloads_parses_and_compares_the_real_change_log(cfg):
     assert (cfg.data_dir / "_localchangelog.csv").read_text(encoding="utf-8-sig").count("\n") == 1   # headers only
 
 
-def test_phase6_downloads_the_real_rpi_file_into_the_rpi_folder(cfg):
-    """The real `RPI/HOME_Look.png` (Azure holds it as `rpi/HOME_Look.png`) is downloaded, read-only, into the
-    default RPI folder of a scratch data folder."""
+# --- Phase 7: real downloads (Azure is only read; files go to a scratch folder) -----------------------------------------
+
+def _signed_in_app(cfg):
     from ledsync.db import connect, init_db
     from ledsync.services import auth
     init_db(cfg.db_path)
@@ -175,20 +175,104 @@ def test_phase6_downloads_the_real_rpi_file_into_the_rpi_folder(cfg):
     conn.close()
     app = create_app(cfg)
     app.config["ALLOWED_HOSTS"] = frozenset({"localhost"})
+    app.config["SYNC_JOBS"] = True                                   # run the job inline so the test can inspect the result
     client = app.test_client()
     client.get(f"/_launch?t={app.config['LAUNCH_TOKEN']}")
     client.post("/login", data={"username": "admin", "password": auth.DEFAULT_PASSWORD,
                                 "csrf_token": csrf_from(client, "/login")})
     client.post("/events/new", data={"event_id": "1000", "csrf_token": csrf_from(client, "/events/new")})
+    return app, client
+
+
+def _text(html):
+    return re.sub(r"\s+", " ", re.sub(r"<[^>]+>", " ", html))
+
+
+def test_phase7_the_check_finds_the_real_files_that_are_not_in_the_change_log(cfg):
+    _, client = _signed_in_app(cfg)
     client.post("/events/1000/changes/check", data={"csrf_token": csrf_from(client, "/events/1000/changes")})
-    resp = client.post("/events/1000/changes/rpi", data={"csrf_token": csrf_from(client, "/events/1000/changes")},
-                       follow_redirects=True)
-    html = resp.get_data(as_text=True)
-    assert resp.status_code == 200 and KEY not in html and "RPI files: 1 downloaded, 0 removed, 0 failed." in html
-    saved = cfg.data_dir / "RPI" / "HOME_Look.png"
-    assert saved.is_file() and saved.read_bytes()[:8] == b"\x89PNG\r\n\x1a\n" and saved.stat().st_size > 100
-    assert sorted(p.name for p in (cfg.data_dir / "RPI").iterdir()) == ["HOME_Look.png"]
-    [row] = db_rows(cfg, "SELECT * FROM download_history")
-    assert (row["led_type"], row["file_name"], row["status"], row["table_number"]) == ("RPI", "HOME_Look.png", "Success", None)
-    assert KEY not in json.dumps(row) and "No RPI files are waiting." in client.get("/events/1000/changes").get_data(as_text=True)
-    print(f"downloaded {saved.stat().st_size} bytes")
+    text = _text(client.get("/events/1000/changes").get_data(as_text=True))
+    assert "New, Not In Log" in text and "In Azure but not in the change log." in text
+    assert "Table 2 Inner" in text or "Inner" in text
+
+
+def test_phase7_real_files_are_downloaded_verified_and_placed_in_the_event_structure(cfg):
+    """A real, small selection (Table 1 Main LED, the RPI file, and some Table 2 files): downloaded through the real
+    engine, checked against the size and MD5 that Azure itself lists, and stored under <folder>/<event>/Table N/<LED>."""
+    import hashlib
+    from ledsync.services import assets, changes, rpi, structure
+    from ledsync.services import registration as reg
+    from ledsync.services.storage import EventLocation
+    _, client = _signed_in_app(cfg)
+    from ledsync.db import connect
+    conn = connect(cfg.db_path)
+    storage = AzureReadOnlyStorage(ACCOUNT, KEY)
+    settings = cs.load_cloud(conn)
+    report = changes.check_event(conn, storage, settings, "1000")
+    wanted = [a for a in report.comparison.assessments if a.action == changes.DOWNLOAD and (
+        (a.table == 1 and a.led_type == "MainLED") or a.led_type == "RPI" or (a.table == 2 and a.file_name == "sponsorsequence.csv")
+        or (a.table == 2 and not a.in_log and a.file_name.lower().endswith(".png") and a.file_name in ("App.png", "default.png")))]
+    assert wanted, "no small real files to download"
+    import dataclasses
+    small = dataclasses.replace(report.comparison, assessments=tuple(wanted))
+    location = EventLocation(report.container, report.folder)
+    a_res = assets.process(conn, storage, ACCOUNT, location, "1000", small, cfg.data_dir / "Events", cfg.data_dir)
+    r_res = rpi.process(conn, storage, ACCOUNT, location, "1000", small, cfg.data_dir / "RPI", cfg.data_dir)
+    assert a_res.failed == 0 and r_res.failed == 0 and a_res.downloaded + r_res.downloaded == len(wanted), (a_res, r_res)
+    events = cfg.data_dir / "Events" / "1000"
+    assert {p.name for p in events.iterdir()} <= {"Table 1", "Table 2"}
+    assert not (events / "Table 2" / "Outer").exists() and not (events / "Table 2" / "Main LED").exists()
+    assert (events / "Table 1" / "Main LED").is_dir()
+    # every stored file equals what Azure lists (size, and MD5 where Azure has one)
+    listed = {}
+    for a in wanted:                                                   # keyed by FULL path: default.png exists in two folders
+        listed[a.path] = storage.find_blob(location, a.path)
+    for a in wanted:
+        folder = (cfg.data_dir / "RPI" / "1000") if a.led_type == "RPI" else events / f"Table {a.table}" / structure.LED_LABELS[a.led_type]
+        stored = folder / a.file_name
+        info = listed[a.path]
+        assert stored.is_file() and stored.stat().st_size == info.size, a.path
+        if info.md5:
+            assert hashlib.md5(stored.read_bytes()).digest() == info.md5, a.path
+    assert db_rows(cfg, "SELECT COUNT(*) AS n FROM download_history WHERE status = 'Success'")[0]["n"] == len(wanted)
+    assert KEY not in json.dumps(db_rows(cfg, "SELECT * FROM download_history"))
+    conn.close()
+    print(f"downloaded and verified {len(wanted)} real files")
+
+
+@pytest.mark.skipif(not os.environ.get("LEDSYNC_LIVE_FULL"), reason="full real download (about 630 MB): set LEDSYNC_LIVE_FULL=1")
+def test_phase7_the_whole_real_event_is_downloaded_through_the_page(cfg):
+    import hashlib
+    from ledsync.services import structure
+    from ledsync.services.storage import EventLocation
+    _, client = _signed_in_app(cfg)
+    tok = lambda: csrf_from(client, "/events/1000/changes")           # noqa: E731
+    client.post("/events/1000/changes/check", data={"csrf_token": tok()})
+    out = client.post("/events/1000/changes/download", data={"csrf_token": tok()}, follow_redirects=True).get_data(as_text=True)
+    text = _text(out)
+    print(text[text.index("Downloaded"):][:200])
+    assert "failed 0." in text
+    storage = AzureReadOnlyStorage(ACCOUNT, KEY)
+    location = storage.find_event("1000", CONTAINER)
+    events = cfg.data_dir / "Events" / "1000"
+    assert sorted(p.name for p in events.iterdir()) == ["Table 1", "Table 2"]
+    assert sorted(p.name for p in (events / "Table 1").iterdir()) == ["Inner", "Main LED", "Outer"]
+    assert sorted(p.name for p in (events / "Table 2").iterdir()) == ["Inner"]                # exactly the event's structure
+    total = 0
+    for folder, local in (("Table 1/Inner", events / "Table 1" / "Inner"), ("Table 1/Outer", events / "Table 1" / "Outer"),
+                          ("Table 1/MainLED", events / "Table 1" / "Main LED"), ("Table 2/Inner", events / "Table 2" / "Inner")):
+        for info in storage.list_files(location, folder):
+            name = info.path.rsplit("/", 1)[-1]
+            if name.lower() == "keepalive.txt" or "." not in name:
+                continue
+            stored = local / name
+            assert stored.is_file() and stored.stat().st_size == info.size, info.path
+            if info.md5:
+                assert hashlib.md5(stored.read_bytes()).digest() == info.md5, info.path
+            total += 1
+    rpi_files = sorted(p.name for p in (cfg.data_dir / "RPI" / "1000").iterdir())
+    assert rpi_files == ["HOME_Look.png"]
+    print(f"verified {total} Table/LED files + RPI against Azure")
+    # a second run has nothing to do
+    again = _text(client.post("/events/1000/changes/download", data={"csrf_token": tok()}, follow_redirects=True).get_data(as_text=True))
+    assert "Downloaded 0 file(s)" in again

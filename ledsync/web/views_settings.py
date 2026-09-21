@@ -35,11 +35,18 @@ def cloud():
     return render_template("settings_cloud.html", **_view_model(cs.load_cloud(get_db())))
 
 
+def _folders_page(db, data_dir, rpi_typed=None, asset_typed=None, error=None):
+    rpi_saved = cs.load_rpi_folder(db, data_dir)
+    asset_saved = cs.load_asset_folder(db, data_dir)
+    return render_template("settings_folders.html", **_ctx(
+        folder=rpi_saved, asset=asset_saved, typed=rpi_saved.saved if rpi_typed is None else rpi_typed,
+        asset_typed=asset_saved.saved if asset_typed is None else asset_typed, error=error))
+
+
 @bp.get("/folders")
 @login_required
 def folders():
-    saved = cs.load_rpi_folder(get_db(), current_app.config["LEDSYNC"].data_dir)
-    return render_template("settings_folders.html", **_ctx(folder=saved, typed=saved.saved))
+    return _folders_page(get_db(), current_app.config["LEDSYNC"].data_dir)
 
 
 @bp.post("/folders")
@@ -47,12 +54,12 @@ def folders():
 def folders_post():
     db = get_db()
     data_dir = current_app.config["LEDSYNC"].data_dir
-    typed = request.form.get("rpi_folder", "")[:1000]
+    rpi_typed = request.form.get("rpi_folder", "")[:1000]
+    asset_typed = request.form.get("asset_folder", "")[:1000]
     try:
-        changed = cs.save_rpi_folder(db, typed, data_dir)
+        changed = cs.save_folders(db, rpi_typed, asset_typed, data_dir)
     except cs.SettingsError as err:
-        return render_template("settings_folders.html", **_ctx(folder=cs.load_rpi_folder(db, data_dir), typed=typed,
-                                                                error=str(err))), 400
+        return _folders_page(db, data_dir, rpi_typed, asset_typed, str(err)), 400
     flash("Local folder settings saved." if changed else "Nothing changed \u2014 the settings were already saved.",
           "success" if changed else "info")
     return redirect(url_for("settings.folders"))

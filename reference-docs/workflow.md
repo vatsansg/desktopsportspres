@@ -157,8 +157,27 @@ Status values: `Not started` / `In progress` / `Awaiting user go-ahead` / `Compl
   6. Carried: **F-49 (owner decision: the flat RPI folder is shared by all events; a second event with the same file name is refused rather than overwriting — per-event sub-folders or "newest replaces" is your call)**, F-50 (streaming for large files, Phase 7), F-43 (local vs UTC time in the CSV), F-44 (result kept in memory only), **F-46 (Phase 7 must re-validate every name at the write site, refuse links, stay inside the event folder, and resolve real blob names case-sensitively)**.
 
 ## Phase 7 — Asset Download
-- **Status:** Not started
-- **Completed on:** / **What was built:** / **QA Test Case doc:** / **Security Checklist:** / **Deviations:**
+- **Status:** Complete (owner's manual test passed and go-ahead given 21 September 2026; built, polished and independently reviewed the same day, and validated against the whole real event; merged to `main` and pushed — hashes in the table below)
+- **Includes:** download of the files identified in Phase 6 (Table/LED files and RPI files), the local asset structure, and the local change log update. **Nothing is pushed to LED devices (Phase 8).**
+- **Completed on:** 21 September 2026
+- **What was built:**
+  - **Step 7.1 — download:** one **DOWNLOAD FILES** button on the Change Log page starts a **background job** (progress "file N of M (x%)", **Cancel**) that always begins with a fresh check. Files are located by a read-only listing (real, case-sensitive Azure names), read in **4 MB ranges** pinned to the listed version, streamed to a hidden temporary file, checked against Azure's **size and MD5**, fsynced and only then moved into place; a wrong download is discarded, retried once and reported (the old copy is never touched). One bad file never stops the rest; a connection problem or Azure 429/5xx ends the run after one retry; a file the history says was downloaded but that is missing on disk is downloaded again; a file gone from both disk and Azure is dropped once.
+  - **Files missing from the change log (owner):** Azure's own file list of each enabled Table/LED folder is compared too, so files the web application never logged (found: **24 assets in Table 2 Inner**) are offered as "New (not in log)". The change log always wins.
+  - **Step 7.2 — local structure (owner):** `<Asset folder>\<Event ID>\Table N\<Inner|Outer|Main LED>\<file>`; the **asset folder is a setting** (Settings → Local Folders, default `Events` in the application data folder); only the event's enabled tables/LED types get folders. RPI files go to `<RPI folder>\<Event ID>\<file>` (per-event sub-folder, owner). The two folders must differ and neither may be inside the other or contain the data folder.
+  - **Step 7.3 — local change log:** every outcome is a `download_history` row (Success / Failure / Deleted) and a row of `_localchangelog.csv`, plus audit and exception rows; `events.last_download` is set. Cloud removals delete the local copy (inside the event's folder only, never through a link).
+  - **Safety:** folders judged by file identity (data folder, its parents, OS folders, drive roots, aliases); names from the log and from Azure refused if unsafe or dangerous types; every level a plain folder (no file/link/junction) on write **and** removal; stale temporary files swept; folder operations time-limited.
+  - **Validated against the real account (read-only):** the whole real Event 1000 downloaded **through the page: 76 files (75 Table/LED + 1 RPI), 0 failed, about 100 s (630 MB)**; every file's size and MD5 equals Azure's; folders exactly `Table 1\{Inner, Outer, Main LED}` and `Table 2\Inner`; a second run downloads nothing. A bug the fake had hidden (`list_files` returned nothing against real Azure) was found and fixed by these live runs.
+  - 1314 automated tests pass (Phases 0–7) plus the live tests.
+- **QA Test Case doc:** `docs/QA_Desktop_Phase7_AssetDownload.md` — 35 cases: 20 passed (8 automated groups, 4 live, 1 rendered-page), 15 manual (TC-M01 – TC-M15) run by the owner: "All good"; includes the step-by-step real-app guide.
+- **Security Checklist:** `docs/Security_Desktop_Phase7_AssetDownload.md`
+- **Independent architect review:** **Approved with notes** — no blockers. Five "fix now" findings reproduced and fixed: Azure-only files in a `Main LED` folder were offered but could never be downloaded; a cloud removal followed a **junction** at Table/LED level and deleted a file outside the asset tree; stale temporary files in sub-folders were never swept; a finished job's **summary could be lost** in a race; a file missing from disk and from Azure kept the run "waiting" forever. Worthwhile notes also done: the retry re-lists (no stale cache), a **file replaced in Azure during a download is detected** (version pinning), Azure 429/5xx stop the run, a stop/cancel skips the slow tidy-up and counts every file not tried, folder settings compared by real location, over-long paths and FIPS-mode checksums handled, accessibility of the progress panel, structured message severity. 34 new tests; **not re-reviewed**.
+- **`ralph-loop` / `wtt-brand`:** run once on the new screens (one orange action per screen — DOWNLOAD FILES, or CHECK FOR CHANGES when nothing waits; visible progress bar; bordered inputs; no-JS fallback; polite live region).
+- **Deviations / owner decisions:**
+  1. **Azure's file list is compared as well as the change log** (owner, 21 Sep 2026).
+  2. **Asset folder is a setting, default `Events`; layout `<folder>\<Event ID>\Table N\<LED type>`** (owner).
+  3. **Integrity = size always, MD5 when Azure has one** (owner).
+  4. **RPI files in a sub-folder per event** (owner) — replaces the flat RPI folder from Phase 6.
+  5. Carried: QA F-51 (an Azure-only file overwritten without a log entry is not re-downloaded), F-52 (no overall time limit on a stalled network write; `Content-Encoding` blobs unverified), F-53 (summary shown once), F-54, **F-55 (nothing is pushed to LED yet — Phase 8)**.
 
 ## Phase 8 — Push / Synchronise to LED Devices
 - **Status:** Not started
@@ -201,7 +220,7 @@ Status values: `Not started` / `In progress` / `Awaiting user go-ahead` / `Compl
 | 4 | Complete | 21 Sep 2026 | `cdc9aa8`, `35bb338`, `f03586e` (merge `2efaafe`) |
 | 5 | Complete | 21 Sep 2026 | `6cf6b79`, `840ee2e`, `11f42dd` (merge `7907ba3`) |
 | 6 | Complete | 21 Sep 2026 | `99de658`, `2b0fa10`, `efbef49`, `caf4c39`, `8e6a8b8` (merge `9293a99`) |
-| 7 | Not started | | |
+| 7 | Complete | 21 Sep 2026 | HASHES |
 | 8 | Not started | | |
 | 9 | Not started | | |
 | 10 | Not started | | |
