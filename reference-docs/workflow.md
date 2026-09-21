@@ -132,9 +132,26 @@ Status values: `Not started` / `In progress` / `Awaiting user go-ahead` / `Compl
   5. Carried: F-32 (test proves this Windows account only; unattended runs in Phase 12), F-35 – F-37 (see QA doc). Owner (21 Sep 2026): the probe file being placed in the destination folder is fine (F-34 closed).
 
 ## Phase 6 — Change Log and Incremental Download Logic
-- **Status:** Not started
-- **Includes:** full-path matching for `_ledassetchangelog.csv` entries (v2.4 note — multiple `sponsorsequence.csv` per event).
-- **Completed on:** / **What was built:** / **QA Test Case doc:** / **Security Checklist:** / **Deviations:**
+- **Status:** Built, polished and independently reviewed — **awaiting the owner's manual test and go-ahead** (branch `phase-6-change-log-and-incremental-download`, not yet merged)
+- **Includes:** cloud change log retrieval and parsing; local change log; incremental comparison. **No file is downloaded, deleted or pushed in this phase.**
+- **Completed on:** 21 September 2026 (build); owner test pending
+- **What was built:**
+  - **Step 6.1 — retrieve and parse:** `services/changelog.py` reads the event's `_ledassetschangelog.csv` (real name; the BRD spelling `_ledassetchangelog.csv` is the fallback) through the existing read-only client, size-capped in the request itself (5 MB / 50,000 rows). Strict decoding; each row validated (safe relative path, status New/Updated/Deleted, readable UTC time); **bad rows are skipped, counted and shown with a fixed reason, the rest still used**. The path is the **full path** (`Table 1/Inner/sponsorsequence.csv`), so the same file name in different tables/LED folders stays distinct (web BRD v2.4).
+  - **Step 6.2 — local change log:** the database (`download_history`) is the record; `_localchangelog.csv` in the application data folder is its CSV copy with the BRD §17 columns, created at start-up (headers only, initially empty), rewritten atomically, formula-neutralised, never fatal if it cannot be written.
+  - **Step 6.3 — incremental comparison:** `services/changes.py` compares by full path (case-insensitive), latest cloud entry per path vs the latest successful local record, in UTC instants (never the local clock). New/Updated newer than local → **Download**; Deleted after a successful local copy → **Delete local copy** (owner decision; carried out in Phase 7); everything else → **Already processed**; anything not `Table N/<enabled LED type>/<file>` → **Not applicable**. `check_event` also re-verifies the storage location and that the event's GUID still matches the cloud before trusting the log.
+  - **Change Log page** (link on Event Details): one orange **CHECK FOR CHANGES**; summary chips (New / Updated / Removed in cloud / Already processed / Not applicable / Unreadable rows), the waiting list, and collapsible sections; result kept in memory; failures plain, categorised and logged.
+  - **Validated against the real account (read-only):** Event 1000's real change log — 84 rows, 0 unreadable, 53 distinct files, Table 1 Inner and Outer `sponsorsequence.csv` distinct, `RPI/HOME_Look.png` not applicable — through the whole page with nothing written locally. 8 live tests pass.
+  - 1042 automated tests pass (Phases 0–6; 198 new) plus 8 live.
+- **QA Test Case doc:** `docs/QA_Desktop_Phase6_ChangeLog.md` — 34 cases: 18 passed (automated, live, rendered), 16 manual (TC-M01 – TC-M16) awaiting the owner; includes the step-by-step real-app guide and a dev script (`scripts/insert_test_history.py`) to see "already processed / updated / removed" on the real event.
+- **Security Checklist:** `docs/Security_Desktop_Phase6_ChangeLog.md`
+- **Independent architect review:** **Approved with notes**, no blockers. Six fix-now findings resolved: Windows-dangerous file names accepted as downloads (trailing dot, `:stream`, device names, illegal characters, over-long — one overwrote another file in the reviewer's probe); several spellings of one table folder (`Table 01`, Unicode digits) creating duplicate downloads; case-folding merging files Windows keeps apart (`ß`/`ss`); a database error emptying `_localchangelog.csv`; an unexpected error giving an error page with no audit row; a saved result never invalidated. Cheap notes also done (tie-breaks, future-dated entries pointed out, removals listed first, wording, more formula starts, unique temp file). Fixes verified by 83 new tests; no second independent pass.
+- **`ralph-loop` / `wtt-brand`:** run once on the new screen (one orange action per screen, bordered controls, readable badges on black, the real 84-entry result fits without side scrolling).
+- **Deviations / owner decisions:**
+  1. **UTC comparison, no cut-off yet** (owner, 21 Sep 2026); the cut-off setting arrives with Phase 10 (QA F-39).
+  2. **Deleted-in-cloud entries queue "Delete local copy"** (owner). Only *decided* here; Phase 7 must do it safely (QA F-38).
+  3. **Database is the record, `_localchangelog.csv` its CSV copy** (owner); Sync Status stays blank until Phase 8.
+  4. Real cloud naming differs from the BRD (file `_ledassetschangelog.csv`; blob folders lower-case while the log says `Inner`) — handled by matching case-insensitively; Phase 7 must locate blobs case-insensitively (QA F-42).
+  5. Carried: F-40 (a real entry with no file extension; ask the web team), F-43 (local vs UTC time in the CSV), F-44 (result kept in memory only), **F-46 (Phase 7 must re-validate every name at the write site, refuse links, stay inside the event folder, and resolve real blob names case-sensitively)**.
 
 ## Phase 7 — Asset Download
 - **Status:** Not started
@@ -180,7 +197,7 @@ Status values: `Not started` / `In progress` / `Awaiting user go-ahead` / `Compl
 | 3 | Complete | 21 Sep 2026 | `8cb2c81` + `1369bac` (merge `6405679`) |
 | 4 | Complete | 21 Sep 2026 | `cdc9aa8`, `35bb338`, `f03586e` (merge `2efaafe`) |
 | 5 | Complete | 21 Sep 2026 | `6cf6b79`, `840ee2e`, `11f42dd` (merge `7907ba3`) |
-| 6 | Not started | | |
+| 6 | Built — awaiting owner test | | |
 | 7 | Not started | | |
 | 8 | Not started | | |
 | 9 | Not started | | |

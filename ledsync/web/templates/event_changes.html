@@ -31,6 +31,8 @@
     <h2 id="summary-heading">Summary</h2>
     <p class="hint">Checked {{ checked }} (this computer's local time) &middot; file {{ source_name }} &middot;
       {{ comparison.total_entries }} entries covering {{ comparison.distinct_paths }} distinct files.</p>
+    {% if future %}<p class="alert alert-info" role="status">{{ future }} entr{{ 'y is' if future == 1 else 'ies are' }} dated more than a day
+      in the future. Check the clock on this computer and on the web application's server.</p>{% endif %}
     <ul class="chips">
       <li class="chip"><span class="badge badge-ready">New</span> <strong>{{ n_new }}</strong></li>
       <li class="chip"><span class="badge badge-ready">Updated</span> <strong>{{ n_updated }}</strong></li>

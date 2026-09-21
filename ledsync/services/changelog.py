@@ -23,12 +23,17 @@ from datetime import datetime
 
 from . import exceptions
 from .events import parse_timestamp
-from .storage import _UNSAFE_PATH, StorageError
+from .storage import StorageError
 
 NAMES = ("_ledassetschangelog.csv", "_ledassetchangelog.csv")   # real name first, BRD spelling second
 MAX_BYTES = 5_000_000
 MAX_ROWS = 50_000
-MAX_PATH_LENGTH = 1024
+MAX_PATH_LENGTH = 200            # a real path is well under 100; the rest of the budget is for the local folder
+MAX_SEGMENT_LENGTH = 255         # NTFS limit for one file or folder name
+_WINDOWS_BAD_CHARS = set('<>:"|?*\\')
+_RESERVED = {"CON", "PRN", "AUX", "NUL", "CONIN$", "CONOUT$",
+             *(f"COM{i}" for i in range(10)), *(f"LPT{i}" for i in range(10)),
+             *(f"{p}{d}" for p in ("COM", "LPT") for d in "\u00b9\u00b2\u00b3")}
 STATUSES = {"new": "New", "updated": "Updated", "deleted": "Deleted"}
 REQUIRED = ("filename", "changetimestamp", "status")
 
@@ -66,16 +71,31 @@ class ParsedChangeLog:
 
 
 def _path_problem(path: str) -> str | None:
-    """Why a path from the file cannot be trusted, or None. Fixed text only."""
-    if not path:
+    """Why a path from the file cannot be trusted, or None. Fixed text only.
+
+    The path becomes a LOCAL Windows file name in Phase 7, so it must be safe THERE, not only
+    inside a URL: a name such as `a.png.` (trailing dot), `a.png:stream` (an NTFS alternate data
+    stream) or `NUL.png` (a device name) would overwrite or hide another file. No trimming is done:
+    a path with spaces at either end is refused rather than silently altered."""
+    if not path.strip():
         return "The file name is empty."
+    if path != path.strip():
+        return "The file path has spaces at its start or end."
     if len(path) > MAX_PATH_LENGTH:
         return "The file path is too long."
-    if _UNSAFE_PATH.search(path) or any(
-            unicodedata.category(ch)[0] == "C" or (unicodedata.category(ch)[0] == "Z" and ch != " ") for ch in path):
+    if any(unicodedata.category(ch)[0] == "C" or (unicodedata.category(ch)[0] == "Z" and ch != " ") for ch in path):
         return "The file path contains characters that are not allowed."
     if path.startswith("/") or any(p in ("", ".", "..") for p in path.split("/")):
         return "The file path is not a valid relative path."
+    for segment in path.split("/"):
+        if len(segment) > MAX_SEGMENT_LENGTH:
+            return "A file or folder name in the path is too long."
+        if any(ch in _WINDOWS_BAD_CHARS for ch in segment):
+            return "The file path contains characters that Windows cannot store in a file name."
+        if segment.endswith((".", " ")) or segment.startswith(" "):
+            return "A file or folder name in the path starts with a space or ends with a space or dot."
+        if segment.split(".")[0].rstrip(" ").upper() in _RESERVED:
+            return "A file or folder name in the path is a reserved Windows name."
     return None
 
 
@@ -126,7 +146,7 @@ def parse_change_log(data: bytes, source_name: str = NAMES[0]) -> ParsedChangeLo
 def _row(row: list[str], line: int, index: dict[str, int]) -> tuple[CloudEntry | None, str]:
     if len(row) <= max(index[c] for c in REQUIRED):
         return None, "The row is missing columns."
-    path = row[index["filename"]].strip()
+    path = row[index["filename"]]
     problem = _path_problem(path)
     if problem:
         return None, problem

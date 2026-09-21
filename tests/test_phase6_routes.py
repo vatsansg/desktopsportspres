@@ -229,13 +229,16 @@ def test_a_check_is_audited_with_counts_only(ev, cfg):
                                                     "0 unreadable row(s) in _ledassetschangelog.csv."}]
 
 
-def test_hostile_file_names_are_escaped_and_the_local_log_stays_safe(ev):
-    put_log(ev, csv_text([("Table 1/Inner/<script>alert(1)</script>.png", T0, "New"),
-                          ("Table 1/Inner/\"><img src=x onerror=alert(1)>.png", T0, "New"),
-                          ("Table 1/Inner/=cmd|calc.png", T0, "New")]))
+def test_hostile_file_names_never_reach_the_page_as_markup(ev):
+    put_log(ev, csv_text([("Table 1/Inner/<script>alert(1)</script>.png", T0, "New"),             # refused: < > are not Windows-legal
+                          ("Table 1/Inner/'><img src=x onerror=alert(1)>.png", T0, "New"),       # refused
+                          ("Table 1/Inner/onerror=alert(1) a&b {{7+7}} {% raw %}.png", T0, "New"),  # legal on Windows: must be escaped
+                          ("Table 9/Inner/x&y'z.png", T0, "New")]))                                 # not applicable path, shown escaped
     html = check(ev).get_data(as_text=True)
     assert "<script>alert" not in html and "<img src=x" not in html
-    assert "&lt;script&gt;" in html
+    assert "Unreadable Rows (2)" in text_of(html)
+    assert "onerror=alert(1) a&amp;b {{7+7}} {% raw %}.png" in html          # shown as plain text, not evaluated
+    assert "x&amp;y&#39;z.png" in html
 
 
 def test_each_event_has_its_own_result(ev, logged_in):

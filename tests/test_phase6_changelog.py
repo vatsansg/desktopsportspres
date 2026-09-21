@@ -99,7 +99,7 @@ BAD_ROWS = [
     ("../secret.txt", T0, "New", "not a valid relative path"),
     ("/abs/x.png", T0, "New", "not a valid relative path"),
     ("Table 1//x.png", T0, "New", "not a valid relative path"),
-    ("Table 1\\Inner\\x.png", T0, "New", "not allowed"),
+    ("Table 1\\Inner\\x.png", T0, "New", "Windows cannot store"),
     ("Table 1/Inner/a\u202eb.png", T0, "New", "not allowed"),
     ("Table 1/Inner/a\u200bb.png", T0, "New", "not allowed"),
     ("Table 1/Inner/a\x07b.png", T0, "New", "not allowed"),

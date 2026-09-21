@@ -47,6 +47,9 @@ def page(event_id):
     row = _load(event_id)
     tz = current_app.config.get("DISPLAY_TZ")
     report = _reports().get(_key(row["event_id"]))
+    if report is not None and not changes.is_current(get_db(), report):
+        _reports().pop(_key(row["event_id"]), None)        # made for an older registration or local history
+        report = None
     ctx = dict(app_name=APP_NAME, version=__version__, username=session.get("user"), event=row, report=None)
     if report is not None:
         c = report.comparison
@@ -54,11 +57,11 @@ def page(event_id):
                    comparison=c, source_name=c.source_name,
                    to_process=dict(total=c.count(changes.DOWNLOAD) + c.count(changes.DELETE),
                                    rows=[_row(a, tz) for a in
-                                         (c.with_action(changes.DOWNLOAD) + c.with_action(changes.DELETE))[:SHOW_LIMIT]],
+                                         (c.with_action(changes.DELETE) + c.with_action(changes.DOWNLOAD))[:SHOW_LIMIT]],
                                    limit=SHOW_LIMIT),
                    done=_section(c, changes.DONE, tz), na=_section(c, changes.NOT_APPLICABLE, tz),
                    n_new=c.count_label(changes.LABEL_NEW), n_updated=c.count_label(changes.LABEL_UPDATED),
-                   n_removed=c.count_label(changes.LABEL_REMOVED), skipped=c.skipped[:20])
+                   n_removed=c.count_label(changes.LABEL_REMOVED), skipped=c.skipped[:20], future=report.future_dated)
     return render_template("event_changes.html", **ctx)
 
 

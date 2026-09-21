@@ -61,6 +61,9 @@ def main() -> int:
         return 2
 
     cfg = config.load()
+    if Path(cfg.data_dir).resolve() != target:
+        print(f"Refusing to run: the application would use {cfg.data_dir}, not {target}.", file=sys.stderr)
+        return 2
     init_db(cfg.db_path)
     conn = connect(cfg.db_path)
     try:

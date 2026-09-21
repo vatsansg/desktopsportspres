@@ -152,8 +152,9 @@ def test_main_led_spellings_are_recognised(folder):
     assert a.action == changes.DOWNLOAD and a.led_type == "MainLED"
 
 
-def test_table_numbers_with_leading_zeros_mean_the_same_table():
-    assert compare([("Table 01/Inner/x.png", T0, "New")]).assessments[0].table == 1
+def test_table_numbers_with_a_leading_zero_are_refused_not_treated_as_a_second_copy():
+    a = compare([("Table 01/Inner/x.png", T0, "New")]).assessments[0]
+    assert a.action == changes.NOT_APPLICABLE and "leading zero" in a.reason
 
 
 def test_a_file_with_no_extension_is_still_listed_as_a_normal_entry():
@@ -288,10 +289,13 @@ def test_a_file_that_cannot_be_replaced_is_reported_not_fatal(conn, cfg):
 def test_a_file_open_in_another_program_keeps_the_previous_version(conn, cfg):
     localchangelog.write(cfg.data_dir, conn)
     target = cfg.data_dir / "_localchangelog.csv"
-    with open(target, "rb"):
-        pass
+    before = target.read_bytes()
     add_history(conn, "1000", 1, "Inner", "a.png", T1)
-    assert localchangelog.write(cfg.data_dir, conn) is True
+    with open(target, "rb"):                                    # Windows will not replace a file that is open
+        assert localchangelog.write(cfg.data_dir, conn) is False
+    assert target.read_bytes() == before and not list(cfg.data_dir.glob("*.tmp"))
+    assert localchangelog.write(cfg.data_dir, conn) is True     # and it works again once the file is closed
+    assert len(read_rows(target)) == 2
 
 
 def test_refresh_repairs_a_deleted_file_from_the_database(conn, cfg):

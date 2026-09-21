@@ -14,6 +14,7 @@ import csv
 import logging
 import os
 import sqlite3
+import uuid
 from pathlib import Path
 
 from . import structure
@@ -26,13 +27,17 @@ HEADERS = ("Serial Number", "Event ID", "Table", "LED Type", "File Name", "Sourc
            "Timestamp", "Source Updated Timestamp", "Download Status", "Sync Status")
 
 
+# The OWASP set, plus a line feed and the full-width look-alikes some spreadsheets also accept.
+_FORMULA_STARTS = ("=", "+", "-", "@", "\t", "\r", "\n", "\uff1d", "\uff0b", "\u2212", "\uff20")
+
+
 def path_for(data_dir) -> Path:
     return Path(data_dir) / FILENAME
 
 
 def _safe(value) -> str:
     text = "" if value is None else str(value)
-    return "'" + text if text[:1] in ("=", "+", "-", "@", "\t", "\r") else text
+    return "'" + text if text[:1] in _FORMULA_STARTS else text
 
 
 def _rows(conn: sqlite3.Connection, tz=None):
@@ -47,12 +52,17 @@ def _rows(conn: sqlite3.Connection, tz=None):
 
 def write(data_dir, conn: sqlite3.Connection | None = None, tz=None) -> bool:
     """(Re)write the file from the database - headers only when there is no database or no history.
-    Atomic (temporary file, then replace). Returns False, never raises, if it cannot be written."""
+    Atomic (unique temporary file, then replace). Returns False, never raises, if it cannot be written.
+    If the database cannot be READ, an existing file is left exactly as it is (it is never replaced by
+    an empty one)."""
     target = path_for(data_dir)
-    temp = target.with_name(target.name + ".tmp")
+    temp = target.with_name(f"{target.name}.{uuid.uuid4().hex}.tmp")
     try:
         rows = list(_rows(conn, tz)) if conn is not None else []
     except sqlite3.Error:
+        log.warning("The local change log was not rewritten because the database could not be read.")
+        if target.exists():
+            return False
         rows = []
     try:
         with open(temp, "w", encoding="utf-8-sig", newline="") as handle:
@@ -62,7 +72,7 @@ def write(data_dir, conn: sqlite3.Connection | None = None, tz=None) -> bool:
                 writer.writerow([_safe(cell) for cell in row])
         os.replace(temp, target)
         return True
-    except OSError:
+    except (OSError, UnicodeError):
         log.warning("The local change log could not be written (it may be open in another program).")
         try:
             os.remove(temp)
