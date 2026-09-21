@@ -4,8 +4,10 @@ Stored in `application_settings`:
     cloud_storage_account   e.g. sasportspresentation
     cloud_container         default YEAR container used to find a new event, e.g. 2026
     cloud_access_key        the Storage Account access key
-    rpi_folder              where files from the event's `RPI` folder are saved on this computer
-                            (empty = the default `RPI` folder inside the application data folder)
+    rpi_folder              where files from the event's `RPI` folder are saved on this computer, in a
+                            sub-folder per event (empty = the default `RPI` folder in the application data folder)
+    asset_folder            where the Table / LED files are saved: <folder>\\<Event ID>\\Table N\\<LED type>
+                            (empty = the default `Events` folder in the application data folder)
 
 OWNER DECISION (21/09/26): the access key is stored as PLAIN TEXT in the database. This
 departs from BRD 33.3 ("must not be stored as plain text where avoidable") and is recorded
@@ -34,7 +36,8 @@ KEY_ACCOUNT = "cloud_storage_account"
 KEY_CONTAINER = "cloud_container"
 KEY_ACCESS = "cloud_access_key"
 KEY_RPI_FOLDER = "rpi_folder"
-OWNED_KEYS = frozenset({KEY_ACCOUNT, KEY_CONTAINER, KEY_ACCESS, KEY_RPI_FOLDER})
+KEY_ASSET_FOLDER = "asset_folder"
+OWNED_KEYS = frozenset({KEY_ACCOUNT, KEY_CONTAINER, KEY_ACCESS, KEY_RPI_FOLDER, KEY_ASSET_FOLDER})
 
 DEV_ACCOUNT = "STORAGE_ACCOUNT_NAME"
 DEV_CONTAINER = "STORAGE_CONTAINER"
@@ -281,3 +284,60 @@ def save_rpi_folder(conn: sqlite3.Connection, text: str, data_dir) -> bool:
         conn.rollback()
         raise SettingsError("The settings could not be saved. Try again.") from None
     return changed
+
+
+DEFAULT_ASSET_NAME = "Events"
+
+
+def default_asset_folder(data_dir) -> Path:
+    return Path(data_dir) / DEFAULT_ASSET_NAME
+
+
+def load_asset_folder(conn: sqlite3.Connection, data_dir) -> RpiFolder:
+    saved = _get(conn, KEY_ASSET_FOLDER).strip()
+    return RpiFolder(saved, Path(saved) if saved else default_asset_folder(data_dir), not saved)
+
+
+def _norm(path) -> str:
+    import os
+    return os.path.normcase(os.path.normpath(str(path))).rstrip("\\") + "\\"
+
+
+def _check_apart(rpi: Path, assets: Path) -> None:
+    a, b = _norm(rpi), _norm(assets)
+    if a.startswith(b) or b.startswith(a):
+        raise SettingsError("The RPI folder and the asset folder must be two different folders, and neither can be inside "
+                            "the other.")
+
+
+def save_folders(conn: sqlite3.Connection, rpi_text: str, asset_text: str, data_dir) -> list[str]:
+    """Validate and save both local folders in one transaction. Returns the NAMES of what changed."""
+    rpi_value = validate_rpi_folder(rpi_text, data_dir)
+    asset_value = _validate_asset_folder(asset_text, data_dir)
+    _check_apart(Path(rpi_value) if rpi_value else default_rpi_folder(data_dir),
+                 Path(asset_value) if asset_value else default_asset_folder(data_dir))
+    changed = []
+    try:
+        if _get(conn, KEY_RPI_FOLDER) != rpi_value:
+            _put(conn, KEY_RPI_FOLDER, rpi_value)
+            changed.append("RPI folder")
+        if _get(conn, KEY_ASSET_FOLDER) != asset_value:
+            _put(conn, KEY_ASSET_FOLDER, asset_value)
+            changed.append("asset folder")
+        oplog.add(conn, "Settings Changed", "Success",
+                  f"Local folders saved ({', '.join(changed)} changed)." if changed else "Local folders saved (no change).")
+        conn.commit()
+    except sqlite3.Error:
+        conn.rollback()
+        raise SettingsError("The settings could not be saved. Try again.") from None
+    return changed
+
+
+def _validate_asset_folder(text: str, data_dir) -> str:
+    value = (text or "").strip()
+    if not value:
+        return ""
+    try:
+        return mappings.validate_shared_folder(value, "Asset folder", forbidden_roots=(data_dir,))
+    except mappings.MappingError as err:
+        raise SettingsError(f"{err} Leave the box empty to use the default asset folder.") from None

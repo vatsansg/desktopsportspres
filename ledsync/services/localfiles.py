@@ -17,7 +17,9 @@ The file names come from cloud storage, which other people control, so every wri
 Removal deletes only a plain file with such a name in that folder.
 """
 
+import hashlib
 import os
+import shutil
 import stat
 import threading
 import time
@@ -38,6 +40,14 @@ _PROTECTED_FILES = ("ledsync.db", "ledsync.db-wal", "ledsync.db-shm", "_localcha
 
 class LocalFileError(Exception):
     """A file could not be written or removed; the message is plain text that is safe to show."""
+
+
+class IntegrityError(LocalFileError):
+    """The downloaded bytes are not what Azure listed (wrong size or checksum); the file was discarded."""
+
+
+class Cancelled(Exception):
+    """The operator cancelled the run."""
 
 
 def run_limited(function, seconds: float = FOLDER_TIMEOUT):
@@ -200,3 +210,110 @@ def _quiet_remove(path: Path) -> None:
         os.remove(path)
     except OSError:
         pass
+
+
+# --- folders below a root, created by this application from names it controls ---------------------------------
+
+def _folder_name_problem(name: str) -> bool:
+    return bool(_path_problem(name)) or "/" in name or "\\" in name or name in (".", "..")
+
+
+def subfolder_path(root, *names) -> Path:
+    """The path of `root\\names[0]\\names[1]...` (each a plain, safe folder name) WITHOUT touching the disk."""
+    path = Path(root)
+    for name in names:
+        if _folder_name_problem(name):
+            raise LocalFileError("A folder name cannot be used on this computer.")
+        path = path / name
+    return path
+
+
+def open_subfolder(root, *names) -> Path:
+    """Create (if needed) and return `root\\names...`. Every level must be a plain folder: an existing file, link or
+    junction with that name is refused, so nothing can be redirected somewhere else."""
+    subfolder_path(root, *names)                                   # validates every name before anything is created
+    return run_limited(lambda: _make_folders(Path(root), names), FOLDER_TIMEOUT)
+
+
+def _make_folders(root: Path, names) -> Path:
+    path = root
+    for name in names:
+        path = path / name
+        try:
+            if os.path.lexists(path):
+                if _is_link(path) or not path.is_dir():
+                    raise LocalFileError("A file or link has the name of a folder this application needs, so it was not used.")
+            else:
+                os.mkdir(path)
+        except LocalFileError:
+            raise
+        except OSError:
+            raise LocalFileError("A folder could not be created. Check the folder and free disk space.") from None
+    return path
+
+
+# --- streaming a download to disk, verified -------------------------------------------------------------------
+
+def write_stream(root, name: str, chunks, *, size: int | None, md5: bytes | None, on_bytes=None, cancelled=None) -> Path:
+    """Write the bytes from `chunks` as `name` in `root`, never holding the whole file in memory.
+
+    The file is built under a temporary name and only moved into place after it has been checked against what Azure
+    listed: exactly `size` bytes and, when Azure has one, the same MD5. A wrong download is discarded (IntegrityError)
+    and the previous copy of the file, if any, is left alone. `cancelled()` is asked between chunks."""
+    root = Path(root)
+    target = _target(root, name)
+    if size is not None:
+        try:
+            free = shutil.disk_usage(root).free
+        except OSError:
+            free = None
+        if free is not None and free < size + 64 * 1024 * 1024:
+            raise LocalFileError("There is not enough free disk space for this file.")
+    temp = root / f".{uuid.uuid4().hex}{TEMP_SUFFIX}"
+    try:
+        if os.path.lexists(target) and (target.is_dir() or _is_link(target)):
+            raise LocalFileError("A folder or link already has that name, so the file was not written.")
+        digest, count = hashlib.md5(), 0
+        with open(temp, "xb") as handle:
+            for chunk in chunks:
+                if cancelled is not None and cancelled():
+                    raise Cancelled()
+                handle.write(chunk)
+                digest.update(chunk)
+                count += len(chunk)
+                if on_bytes is not None:
+                    on_bytes(len(chunk))
+            handle.flush()
+            os.fsync(handle.fileno())
+        if size is not None and count != size:
+            raise IntegrityError("The downloaded file was not the size Azure lists, so it was discarded.")
+        if md5 and digest.digest() != md5:
+            raise IntegrityError("The downloaded file did not match Azure's checksum, so it was discarded.")
+        os.replace(temp, target)
+        landed = os.path.normcase(str(Path(os.path.realpath(target)).parent))
+        if landed != os.path.normcase(os.path.realpath(root)):
+            raise LocalFileError("The file did not land in its folder, so it cannot be trusted.")
+    except (LocalFileError, Cancelled):
+        _quiet_remove(temp)
+        raise
+    except PermissionError:
+        _quiet_remove(temp)
+        raise LocalFileError("The file could not be replaced. It may be read-only or open in another program.") from None
+    except OSError:
+        _quiet_remove(temp)
+        raise LocalFileError("The file could not be written. Check the folder and free disk space.") from None
+    except BaseException:
+        _quiet_remove(temp)                                        # e.g. a StorageError raised by the download itself
+        raise
+    return target
+
+
+def missing_files(folder: Path, names) -> set | None:
+    """Which of `names` are NOT files in `folder` (None if the folder does not answer in time). A folder that does
+    not exist is missing them all."""
+    def look():
+        return {n for n in names if not os.path.lexists(folder / n)}
+    try:
+        return run_limited(look, 5.0)
+    except LocalFileError:
+        return None

@@ -21,6 +21,10 @@ Rules (owner decisions 21/09/26 and the web BRD v2.4 note):
   * A file with no extension is not an asset and is NOT APPLICABLE (owner decision 21/09/26).
   * Entries that are not `Table N/<LED type>/<file>` for a table and LED type the event actually
     enables (or `RPI/<file>`) are listed as NOT APPLICABLE, with the reason, and are never acted on.
+  * Files that ARE in Azure but have no change-log entry at all (the web application does not always log files it
+    copies) are found by also listing each enabled Table / LED folder in Azure, and are offered as
+    "New (not in log)" when they are not stored locally yet (owner decision 21/09/26). The change log always wins
+    for any path it mentions.
   * The "Last Updated Timestamp Cut-off" (BRD Section 14) is still an open BRD item; the owner
     chose UTC comparison with no cut-off for now (a setting comes with Phase 10).
 
@@ -33,12 +37,15 @@ import re
 import sqlite3
 import unicodedata
 from dataclasses import dataclass
+from dataclasses import replace
 from datetime import datetime, timedelta, timezone
 
 from . import cloud, exceptions, oplog
 from . import registration as reg
 from . import structure
-from .changelog import ChangeLogError, CloudEntry, ParsedChangeLog, SkippedRow, fetch_change_log
+from .changelog import (
+    ChangeLogError, CloudEntry, ParsedChangeLog, SkippedRow, _path_problem, blocked_name_problem, fetch_change_log,
+)
 from .events import parse_timestamp
 from .storage import StorageError
 
@@ -50,6 +57,9 @@ DONE = "Already processed"
 NOT_APPLICABLE = "Not applicable"
 
 LABEL_NEW, LABEL_UPDATED, LABEL_REMOVED = "New", "Updated", "Removed in cloud"
+LABEL_NEW_UNLOGGED = "New (not in log)"
+LED_FOLDER_NAMES = {"Inner": ("Inner",), "Outer": ("Outer",), "MainLED": ("MainLED", "Main LED")}
+NOT_ASSETS = frozenset({"keepalive.txt"})          # placeholders the web application uses to create folders
 RPI = "RPI"                        # the pseudo LED type of files in the event's RPI folder
 
 _TABLE_RE = re.compile(r"^Table ([1-9][0-9]{0,3})$", re.IGNORECASE)     # ASCII digits only, no leading zero
@@ -100,6 +110,7 @@ class Assessment:
     reason: str
     revisions: int                    # how many log entries there are for this path
     local_status: str = ""            # the latest local record for this path: Success | Deleted | "" (none)
+    in_log: bool = True               # False: the file is in Azure but the change log does not mention it
 
 
 @dataclass(frozen=True)
@@ -108,6 +119,7 @@ class Comparison:
     skipped: tuple[SkippedRow, ...]
     total_entries: int
     source_name: str
+    azure_note: str = ""              # why Azure's own file list could not be compared (empty = it was)
 
     def with_action(self, action: str) -> list[Assessment]:
         return [a for a in self.assessments if a.action == action]
@@ -217,9 +229,57 @@ def compare(parsed: ParsedChangeLog, event_structure: structure.EventStructure,
             action, label, reason = _decide(latest, have)
             out.append(Assessment(latest.path, table, led, name, latest.status, latest.timestamp_text, latest.timestamp,
                                   action, label, reason, count, have.status if have else ""))
-    out.sort(key=lambda a: (a.action == NOT_APPLICABLE, a.table if a.table is not None else 10**6,
-                            LED_ORDER.get(a.led_type or "", 99), a.path.casefold(), a.path))
+    out.sort(key=_sort_key)
     return Comparison(tuple(out), parsed.skipped, len(parsed.entries), parsed.source_name)
+
+
+def _sort_key(a: Assessment):
+    return (a.action == NOT_APPLICABLE, a.table if a.table is not None else 10**6,
+            LED_ORDER.get(a.led_type or "", 99), a.path.casefold(), a.path)
+
+
+def add_azure_files(comparison: Comparison, storage, location, event_structure: structure.EventStructure,
+                    local: dict[str, LocalRecord]) -> Comparison:
+    """Also compare Azure's own file list: files in an enabled Table / LED folder that the change log never mentions
+    are offered for download (unless already stored). Read-only listing; a problem is reported, never fatal."""
+    logged = {path_key(a.table, a.led_type, a.file_name) for a in comparison.assessments if a.table is not None}
+    logged_loose = {_loose(k) for k in logged}
+    logged_paths = {fold(a.path) for a in comparison.assessments}
+    extras: list[Assessment] = []
+    seen: set[str] = set()
+    notes: list[str] = []
+    listings: dict = {}
+    epoch = datetime(1970, 1, 1, tzinfo=timezone.utc)
+    for table, led in event_structure.enabled_pairs:
+        found: dict = {}
+        try:
+            for folder in LED_FOLDER_NAMES[led]:
+                for info in storage.list_files(location, f"Table {table}/{folder}", listings):
+                    found[info.path.rsplit("/", 1)[-1]] = info
+        except StorageError as err:
+            notes.append(err.message)
+            continue
+        for name, info in found.items():
+            if (_path_problem(name) or blocked_name_problem(name) or not has_extension(name)
+                    or name.casefold() in NOT_ASSETS):
+                continue
+            key = path_key(table, led, name)
+            if key in logged or key in seen or fold(f"Table {table}/{led}/{name}") in logged_paths:
+                continue
+            if _loose(key) in logged_loose or any(_loose(key) == _loose(s) for s in seen):
+                continue                                              # would be the same file on disk as another entry
+            seen.add(key)
+            have = local.get(key)
+            when = parse_timestamp(info.modified) or epoch
+            action, label, reason = ((DOWNLOAD, LABEL_NEW_UNLOGGED, "In Azure but not in the change log.") if have is None
+                                     else (DONE, DONE, "Already downloaded."))
+            extras.append(Assessment(f"Table {table}/{led}/{name}", table, led, name, "New", info.modified,
+                                     when, action, label, reason, 0, have.status if have else "", False))
+    note = " ".join(dict.fromkeys(notes))
+    if not extras and not note:
+        return comparison
+    merged = sorted([*comparison.assessments, *extras], key=_sort_key)
+    return replace(comparison, assessments=tuple(merged), azure_note=note)
 
 
 def _decide(latest: CloudEntry, have: LocalRecord | None) -> tuple[str, str, str]:
@@ -307,7 +367,9 @@ def check_event(conn: sqlite3.Connection, storage, settings, event_id: str) -> R
                              "Re-register the event, then check for changes.")
         parsed = fetch_change_log(storage, fetched.location)
         marker = history_marker(conn, event_id)
-        comparison = compare(parsed, event_structure, local_state(conn, event_id))
+        local = local_state(conn, event_id)
+        comparison = compare(parsed, event_structure, local)
+        comparison = add_azure_files(comparison, storage, fetched.location, event_structure, local)
     except CheckError as err:
         _log_failure(conn, event_id, operation, err.category, err.message)
         raise
@@ -323,7 +385,8 @@ def check_event(conn: sqlite3.Connection, storage, settings, event_id: str) -> R
     oplog.record(conn, operation, "Success",
                  f"{comparison.count(DOWNLOAD)} to download, {comparison.count(DELETE)} to remove, "
                  f"{comparison.count(DONE)} already processed, {comparison.count(NOT_APPLICABLE)} not applicable, "
-                 f"{len(comparison.skipped)} unreadable row(s) in {comparison.source_name}.", event_id)
+                 f"{len(comparison.skipped)} unreadable row(s) in {comparison.source_name}; "
+                 f"{comparison.count_label(LABEL_NEW_UNLOGGED)} file(s) found in Azure but not in the change log.", event_id)
     now = datetime.now(timezone.utc)
     future = sum(1 for e in parsed.entries if e.timestamp > now + FUTURE_TOLERANCE)
     return Report(event_id, comparison, now, fetched.location.folder, fetched.location.container, registered, marker,

@@ -16,6 +16,7 @@ request URLs and identifiers), and the access key never appears in any message.
 import logging
 import re
 from dataclasses import dataclass
+from datetime import timezone
 from urllib.parse import quote
 
 from azure.core.exceptions import (
@@ -67,6 +68,15 @@ class EventLocation:
         """Address of a blob, for the record. Never contains a credential."""
         return (f"https://{account}.blob.core.windows.net/{quote(self.container)}/"
                 f"{quote(self.folder)}/{quote(relative_path)}")
+
+
+@dataclass(frozen=True)
+class BlobInfo:
+    """A file in an event folder as Azure lists it (real spelling, size and fingerprint)."""
+    path: str                  # relative to the event folder, e.g. 'rpi/HOME_Look.png'
+    size: int | None
+    md5: bytes | None          # Azure's own MD5 of the content, when it has one
+    modified: str              # last-modified time, ISO UTC ('' if unknown)
 
 
 @dataclass(frozen=True)
@@ -208,19 +218,23 @@ class AzureReadOnlyStorage:
         names are case-sensitive. Each level is looked up by listing (a read), never guessed.
         `cache` (one dict per run) keeps each folder's listing so many files cost few calls.
         Raises StorageError if nothing matches or if two different files match (ambiguous)."""
+        return self.find_blob(location, relative_path, cache).path
+
+    def find_blob(self, location: EventLocation, relative_path: str, cache: dict | None = None) -> BlobInfo:
+        """Like `resolve_relative_path`, but also returns the size and fingerprint Azure lists for the file."""
         location.blob_path(relative_path)                              # validates the path
         wanted = relative_path.split("/")
         cache = {} if cache is None else cache
-        frontier = [location.folder + "/"]                            # every real spelling that fits so far
+        frontier = [(location.folder + "/", None)]                    # every real spelling that fits so far
         try:
             for depth, part in enumerate(wanted):
                 is_file = depth == len(wanted) - 1
                 folded = part.translate(_ASCII_LOWER)
                 found = []
-                for prefix in frontier:
-                    for leaf, is_folder in self._listing(location.container, prefix, cache):
-                        if is_folder != is_file and leaf.translate(_ASCII_LOWER) == folded:
-                            found.append(prefix + leaf + ("" if is_file else "/"))
+                for prefix, _ in frontier:
+                    for entry in self._listing(location.container, prefix, cache):
+                        if entry[1] == is_file and entry[0].translate(_ASCII_LOWER) == folded:
+                            found.append((prefix + entry[0] + ("" if is_file else "/"), entry))
                 if not found:
                     raise StorageError(exceptions.MISSING_FOLDER,
                                        f"The file {relative_path} was not found in the event folder.")
@@ -233,24 +247,88 @@ class AzureReadOnlyStorage:
             raise
         except Exception as exc:                                       # noqa: BLE001
             raise map_error(exc, f"looking for {relative_path}") from None
-        return frontier[0][len(location.folder) + 1:]
+        full, entry = frontier[0]
+        return BlobInfo(full[len(location.folder) + 1:], entry[2], entry[3], entry[4])
+
+    def list_files(self, location: EventLocation, folder_path: str, cache: dict | None = None) -> list[BlobInfo]:
+        """The files directly inside a folder of the event (e.g. `Table 1/Inner`), the folder being matched in any
+        A-Z letter case. A folder that does not exist has no files. Read-only listing."""
+        location.blob_path(folder_path + "/x")                         # validates the folder path
+        cache = {} if cache is None else cache
+        frontier = [location.folder + "/"]
+        try:
+            for part in folder_path.split("/"):
+                folded = part.translate(_ASCII_LOWER)
+                frontier = [prefix + entry[0] + "/" for prefix in frontier
+                            for entry in self._listing(location.container, prefix, cache)
+                            if not entry[1] and entry[0].translate(_ASCII_LOWER) == folded]
+                if not frontier:
+                    return []
+            if len(frontier) > 1:
+                raise StorageError(exceptions.CONFIGURATION,
+                                   f"More than one folder in the event folder matches {folder_path} apart from letter "
+                                   "case, so it was not used. Ask the web application administrator to rename one.")
+            return [BlobInfo(frontier[0][len(location.folder) + 1:] + entry[0], entry[2], entry[3], entry[4])
+                    for entry in self._listing(location.container, frontier[0], cache) if entry[1] is False]
+        except StorageError:
+            raise
+        except Exception as exc:                                       # noqa: BLE001
+            raise map_error(exc, f"listing {folder_path}") from None
 
     def _listing(self, container: str, prefix: str, cache: dict) -> list:
-        """(name, is_folder) for everything directly inside `prefix`, listed once per cache."""
+        """(name, is_file, size, md5, modified) for everything directly inside `prefix`, listed once per cache.
+        NOTE: `is_file` is the second field; folders have is_file False."""
         key = (container, prefix)
         if key not in cache:
             entries = []
             for item in self._service.get_container_client(container).walk_blobs(name_starts_with=prefix, delimiter="/"):
-                name = getattr(item, "name", "")
+                name = item.name
                 if not name.startswith(prefix):
                     continue
                 leaf = name[len(prefix):]
                 folder = leaf.endswith("/")
                 leaf = leaf[:-1] if folder else leaf
-                if leaf and "/" not in leaf:
-                    entries.append((leaf, folder))
+                if not leaf or "/" in leaf:
+                    continue
+                size = md5 = None
+                modified = ""
+                if not folder:
+                    try:
+                        size = int(item.size)
+                    except (AttributeError, TypeError, ValueError):
+                        size = None
+                    try:
+                        raw = item.content_settings.content_md5
+                        md5 = bytes(raw) if raw else None
+                    except (AttributeError, TypeError):
+                        md5 = None
+                    try:
+                        modified = item.last_modified.astimezone(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+                    except (AttributeError, TypeError, ValueError):
+                        modified = ""
+                entries.append((leaf, not folder, size, md5, modified))
             cache[key] = entries
         return cache[key]
+
+    def iter_blob(self, location: EventLocation, relative_path: str, size: int, chunk_size: int = 4 * 1024 * 1024):
+        """Yield a file's bytes in ranges of `chunk_size` (so a large video never sits in memory whole). `relative_path`
+        must be the REAL path from `find_blob`, `size` the listed size. Raises StorageError."""
+        blob = location.blob_path(relative_path)
+        offset = 0
+        try:
+            client = self._service.get_blob_client(container=location.container, blob=blob)
+            while offset < size:
+                data = bytes(client.download_blob(offset=offset, length=min(chunk_size, size - offset)).readall())
+                if not data:
+                    raise StorageError(exceptions.DOWNLOAD, "Azure ended the download early.")
+                offset += len(data)
+                yield data
+        except StorageError:
+            raise
+        except ResourceNotFoundError:
+            raise StorageError(exceptions.MISSING_FOLDER, f"The file {relative_path} was not found in the event folder.") from None
+        except Exception as exc:                                       # noqa: BLE001
+            raise map_error(exc, f"downloading {relative_path}") from None
 
     # --- downloading -----------------------------------------------------------------------------
     def read_blob(self, location: EventLocation, relative_path: str, max_bytes: int) -> bytes:

@@ -228,3 +228,6 @@ a.btn-secondary[href] { text-decoration: none; }
 .subnav a.active { border-color: var(--text); background: #1a1a1a; }
 .hint a, .lede a, .panel a:not(.btn) { color: var(--wtt-blue); text-underline-offset: 3px; }
 .hint a:hover, .lede a:hover, .panel a:not(.btn):hover { color: var(--text); }
+
+/* ---- Download progress ---- */
+progress { width: 100%; height: 14px; accent-color: var(--wtt-blue); }

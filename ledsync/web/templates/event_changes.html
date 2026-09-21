@@ -11,14 +11,34 @@
   <p class="alert alert-{{ category }}" role="{{ 'alert' if category == 'error' else 'status' }}">{{ message }}</p>
   {% endfor %}
 
+  {% for line in job_summary %}
+  <p class="alert {{ 'alert-success' if loop.first and 'failed 0.' in line else 'alert-error' if loop.first else 'alert-info' }}"
+     role="{{ 'status' if loop.first and 'failed 0.' in line else 'alert' }}">{{ line }}</p>
+  {% endfor %}
+
+  {% if running %}
+  <section aria-labelledby="progress-heading" class="block">
+    <h2 id="progress-heading">Download In Progress</h2>
+    <div id="progress" class="panel" data-url="{{ url_for('changes.progress', event_id=event.event_id) }}" role="status" aria-live="polite">
+      <p id="progress-text">Starting…</p>
+      <progress id="progress-bar" max="100" value="0" aria-label="Progress of the current file">0%</progress>
+    </div>
+    <form method="post" action="{{ url_for('changes.cancel', event_id=event.event_id) }}" novalidate>
+      <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+      <div class="form-actions"><button type="submit" class="btn btn-secondary">Cancel Download</button></div>
+    </form>
+  </section>
+  <script src="{{ url_for('static', filename='js/changes.js') }}" defer></script>
+  {% else %}
+
   <section aria-labelledby="check-heading" class="block">
     <h2 id="check-heading">Check For Changes</h2>
-    <p class="hint">Reads this event's change log from Azure Storage and compares it with what this application has already
-      processed. The check itself downloads nothing. Table and LED files are downloaded in the next phase; RPI files can be downloaded below.</p>
+    <p class="hint">Reads this event's change log and Azure's file list and compares them with what this application has already
+      downloaded. The check itself downloads nothing.</p>
     <form method="post" action="{{ url_for('changes.check', event_id=event.event_id) }}" novalidate data-busy-text="CONTACTING AZURE…">
       <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
       <div class="form-actions">
-        <button type="submit" class="btn btn-primary">CHECK FOR CHANGES</button>
+        <button type="submit" class="btn {{ 'btn-secondary' if waiting_total else 'btn-primary' }}">{{ 'Check Again' if waiting_total else 'CHECK FOR CHANGES' }}</button>
         <a class="btn btn-secondary" href="{{ url_for('devices.details', event_id=event.event_id) }}">Back to Event</a>
       </div>
     </form>
@@ -33,8 +53,10 @@
       {{ comparison.total_entries }} entries covering {{ comparison.distinct_paths }} distinct files.</p>
     {% if future %}<p class="alert alert-info" role="status">{{ future }} entr{{ 'y is' if future == 1 else 'ies are' }} dated more than a day
       in the future. Check the clock on this computer and on the web application's server.</p>{% endif %}
+    {% if comparison.azure_note %}<p class="alert alert-info" role="status">Azure's own file list could not be compared: {{ comparison.azure_note }}</p>{% endif %}
     <ul class="chips">
       <li class="chip"><span class="badge badge-ready">New</span> <strong>{{ n_new }}</strong></li>
+      {% if n_unlogged %}<li class="chip"><span class="badge badge-ready">New, Not In Log</span> <strong>{{ n_unlogged }}</strong></li>{% endif %}
       <li class="chip"><span class="badge badge-ready">Updated</span> <strong>{{ n_updated }}</strong></li>
       <li class="chip"><span class="badge badge-attention">Removed In Cloud</span> <strong>{{ n_removed }}</strong></li>
       <li class="chip"><span class="badge badge-synced">Already Processed</span> <strong>{{ done.total }}</strong></li>
@@ -43,22 +65,24 @@
     </ul>
   </section>
 
-  <section aria-labelledby="rpi-heading" class="block">
-    <h2 id="rpi-heading">RPI Files</h2>
-    <p class="hint">Files in the event's <span class="mono">RPI</span> folder are saved to
-      <span class="mono">{{ rpi_folder.effective }}</span>. <a href="{{ url_for('settings.folders') }}">Change the folder in Settings</a>.</p>
-    {% if rpi_waiting %}
-    <form method="post" action="{{ url_for('changes.download_rpi', event_id=event.event_id) }}" novalidate data-busy-text="DOWNLOADING…">
+  <section aria-labelledby="download-heading" class="block">
+    <h2 id="download-heading">Download Files</h2>
+    <p class="hint">Table and LED files are saved to <span class="mono">{{ asset_folder.effective }}\&lt;Event ID&gt;\Table N\&lt;LED type&gt;</span>;
+      RPI files to <span class="mono">{{ rpi_folder.effective }}\&lt;Event ID&gt;</span>.
+      <a href="{{ url_for('settings.folders') }}">Change the folders in Settings</a>.</p>
+    {% if waiting_total %}
+    <form method="post" action="{{ url_for('changes.download', event_id=event.event_id) }}" novalidate data-busy-text="STARTING…">
       <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
       <div class="form-actions">
-        <button type="submit" class="btn btn-secondary" data-busy-label="Downloading…">Update RPI Files ({{ rpi_waiting }})</button>
+        <button type="submit" class="btn btn-primary">DOWNLOAD FILES ({{ waiting_total }})</button>
       </div>
+      <p class="hint">{{ asset_waiting }} Table / LED file(s) and {{ rpi_waiting }} RPI file(s) will be downloaded or removed.
+        Files are checked against Azure's size and checksum; nothing is sent to the LED devices yet.</p>
     </form>
     {% else %}
-    <p class="panel">No RPI files are waiting.</p>
+    <p class="panel">Nothing is waiting to be downloaded.</p>
     {% endif %}
   </section>
-
   <section aria-labelledby="todo-heading" class="block">
     <h2 id="todo-heading">Waiting To Be Processed ({{ to_process.total }})</h2>
     {% if to_process.rows %}
@@ -130,6 +154,7 @@
     <ul>{% for s in skipped %}<li>Line {{ s.line }}: {{ s.reason }}</li>{% endfor %}</ul>
     {% if comparison.skipped|length > skipped|length %}<p class="hint">Showing the first {{ skipped|length }}.</p>{% endif %}
   </details>
+  {% endif %}
   {% endif %}
   {% endif %}
 </main>

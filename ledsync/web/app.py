@@ -14,7 +14,7 @@ from .views_events import bp as events_bp
 from .views_settings import bp as settings_bp
 from .views_devices import bp as devices_bp
 from .views_changes import bp as changes_bp
-from ..services import localchangelog
+from ..services import downloads, localchangelog
 from ..services import connectivity
 from ..services import storage as azure_storage
 from ..services.registration import PendingReregistrations
@@ -57,6 +57,7 @@ def create_app(config: Config) -> Flask:
     app.extensions["ledsync.pending"] = PendingReregistrations()
     app.extensions["ledsync.storage_factory"] = azure_storage.from_settings
     app.extensions["ledsync.checker"] = connectivity.check_many
+    app.extensions["ledsync.jobs"] = downloads.JobRegistry()   # background downloads, by event
     app.extensions["ledsync.change_reports"] = {}      # last change check per event (in memory)
     localchangelog.refresh(config)                     # _localchangelog.csv exists and matches the database (never fatal)
 

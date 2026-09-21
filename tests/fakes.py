@@ -7,6 +7,9 @@ mapping) is what the tests exercise - not a mock of it.
     storage = AzureReadOnlyStorage("sasportspresentation", KEY, service_factory=fake.factory)
 """
 
+import hashlib
+from datetime import datetime, timezone
+
 from azure.core.exceptions import ClientAuthenticationError, HttpResponseError, ResourceNotFoundError
 
 # Shaped like a real 88-character account key, but obviously fake.
@@ -17,6 +20,22 @@ ACCOUNT = "sasportspresentation"
 class _Named:
     def __init__(self, name):
         self.name = name
+
+
+class _Settings:
+    def __init__(self, md5):
+        self.content_md5 = md5
+
+
+class _BlobItem:
+    """What `walk_blobs` yields for a file: name, size, content settings (MD5) and last-modified time."""
+
+    def __init__(self, name, data, service):
+        self.name = name
+        self.size = len(data)
+        digest = service.md5_overrides.get(name, None if service.no_md5 else hashlib.md5(data).digest())
+        self.content_settings = _Settings(bytearray(digest) if digest else None)
+        self.last_modified = service.modified
 
 
 class _Download:
@@ -60,7 +79,7 @@ class _ContainerClient:
                     seen.append(prefix)
                     yield _Named(prefix)
             else:
-                yield _Named(path)
+                yield _BlobItem(path, self._service.blobs[(container, path)], self._service)
 
 
 class FakeBlobService:
@@ -72,6 +91,9 @@ class FakeBlobService:
         self.downloads = []
         self.fail_with = None          # an exception raised by the next network call
         self.calls = []
+        self.no_md5 = False            # True: Azure has no fingerprint for the files
+        self.md5_overrides = {}        # blob name -> a (wrong) MD5 to report, to test corruption checks
+        self.modified = datetime(2026, 9, 20, 12, 0, 0, tzinfo=timezone.utc)
 
     # --- test helpers
     def put(self, container, path, data):

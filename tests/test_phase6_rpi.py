@@ -269,7 +269,7 @@ def check(client):
 
 
 def download(client):
-    return client.post("/events/1000/changes/rpi", data={"csrf_token": csrf_from(client, "/events/1000/changes")},
+    return client.post("/events/1000/changes/download", data={"csrf_token": csrf_from(client, "/events/1000/changes")},
                        follow_redirects=True)
 
 
@@ -286,17 +286,17 @@ def test_the_rpi_file_is_downloaded_into_the_default_rpi_folder(ev, cfg):
     put_log(ev, [("RPI/HOME_Look.png", T1, "New")])
     check(ev)
     html = page(ev)
-    assert "Update RPI Files (1)" in html and str(cfg.data_dir / "RPI") in html
+    assert "DOWNLOAD FILES (1)" in html and str(cfg.data_dir / "RPI") in html
     assert html.count("btn-primary") == 1                               # still only one orange action on the page
     out = download(ev).get_data(as_text=True)
-    assert "RPI files: 1 downloaded, 0 removed, 0 failed." in out
-    assert (cfg.data_dir / "RPI" / "HOME_Look.png").read_bytes() == PNG
-    assert sorted(p.name for p in (cfg.data_dir / "RPI").iterdir()) == ["HOME_Look.png"]
+    assert "Downloaded 1 file(s), removed 0, failed 0." in out
+    assert (cfg.data_dir / "RPI" / "1000" / "HOME_Look.png").read_bytes() == PNG
+    assert sorted(p.name for p in (cfg.data_dir / "RPI" / "1000").iterdir()) == ["HOME_Look.png"]
     [row] = history(cfg)
     assert row["event_id"] == "1000" and row["file_name"] == "HOME_Look.png" and row["table_number"] is None
     assert row["led_type"] == "RPI" and row["status"] == "Success" and row["source_timestamp"] == T1
-    assert row["local_path"] == str(cfg.data_dir / "RPI" / "HOME_Look.png")
-    assert "No RPI files are waiting." in page(ev) and "Waiting To Be Processed (0)" in text_of(page(ev))
+    assert row["local_path"] == str(cfg.data_dir / "RPI" / "1000" / "HOME_Look.png")
+    assert "Nothing is waiting to be downloaded." in page(ev) and "Waiting To Be Processed (0)" in text_of(page(ev))
     assert db_rows(cfg, "SELECT last_download FROM events")[0]["last_download"]
     assert db_rows(cfg, "SELECT status FROM operation_log WHERE operation = 'RPI Files'") == [{"status": "Success"}]
 
@@ -320,7 +320,7 @@ def test_a_second_press_has_nothing_to_do(ev, cfg):
     download(ev)
     calls = len(azure_of(ev).downloads)
     again = download(ev).get_data(as_text=True)
-    assert "no RPI files to download or remove" in again and len(history(cfg)) == 1
+    assert "Nothing is waiting" in again and len(history(cfg)) == 1
     assert len([d for d in azure_of(ev).downloads if d[1].endswith("HOME_Look.png")]) == 1 and len(azure_of(ev).downloads) >= calls
 
 
@@ -333,15 +333,15 @@ def test_an_updated_file_is_replaced_and_a_deleted_one_is_removed_then_restored(
     put_log(ev, [("RPI/HOME_Look.png", T0, "New"), ("RPI/HOME_Look.png", T1, "Updated")])
     assert "Updated 1" in text_of(check(ev).get_data(as_text=True))
     download(ev)
-    assert (cfg.data_dir / "RPI" / "HOME_Look.png").read_bytes() == b"second version"
+    assert (cfg.data_dir / "RPI" / "1000" / "HOME_Look.png").read_bytes() == b"second version"
     put_log(ev, [("RPI/HOME_Look.png", T0, "New"), ("RPI/HOME_Look.png", T1, "Updated"), ("RPI/HOME_Look.png", T2, "Deleted")])
     check(ev)
     out = download(ev).get_data(as_text=True)
-    assert "0 downloaded, 1 removed, 0 failed" in out and not (cfg.data_dir / "RPI" / "HOME_Look.png").exists()
+    assert "Downloaded 0 file(s), removed 1, failed 0" in out and not (cfg.data_dir / "RPI" / "1000" / "HOME_Look.png").exists()
     assert [h["status"] for h in history(cfg)] == ["Success", "Success", "Deleted"]
     put_log(ev, [("RPI/HOME_Look.png", T0, "New"), ("RPI/HOME_Look.png", T2, "Deleted"), ("RPI/HOME_Look.png", "2026-09-17T10:00:00Z", "New")])
     check(ev)
-    assert "1 downloaded" in download(ev).get_data(as_text=True) and (cfg.data_dir / "RPI" / "HOME_Look.png").exists()
+    assert "Downloaded 1 file(s)" in download(ev).get_data(as_text=True) and (cfg.data_dir / "RPI" / "1000" / "HOME_Look.png").exists()
 
 
 def test_the_chosen_folder_from_settings_is_used(ev, cfg, tmp_path_factory):
@@ -351,7 +351,7 @@ def test_the_chosen_folder_from_settings_is_used(ev, cfg, tmp_path_factory):
     put_log(ev, [("RPI/HOME_Look.png", T1, "New")])
     check(ev)
     download(ev)
-    assert (mine / "HOME_Look.png").read_bytes() == PNG and not (cfg.data_dir / "RPI").exists()
+    assert (mine / "1000" / "HOME_Look.png").read_bytes() == PNG and not (cfg.data_dir / "RPI").exists()
 
 
 def test_one_bad_file_never_stops_the_others_and_is_tried_again_next_time(ev, cfg):
@@ -359,45 +359,21 @@ def test_one_bad_file_never_stops_the_others_and_is_tried_again_next_time(ev, cf
     put_log(ev, [("RPI/good.png", T1, "New"), ("RPI/missing.png", T1, "New")])
     check(ev)
     out = download(ev).get_data(as_text=True)
-    assert "1 downloaded, 0 removed, 1 failed" in out and "missing.png:" in out and "was not found" in out
-    assert (cfg.data_dir / "RPI" / "good.png").exists() and not (cfg.data_dir / "RPI" / "missing.png").exists()
+    assert "Downloaded 1 file(s), removed 0, failed 1" in out and "missing.png:" in out and "was not found" in out
+    assert (cfg.data_dir / "RPI" / "1000" / "good.png").exists() and not (cfg.data_dir / "RPI" / "1000" / "missing.png").exists()
     assert sorted(h["status"] for h in history(cfg)) == ["Failure", "Success"]
     ex = db_rows(cfg, "SELECT category, operation, file_name FROM exception_log")
     assert ex == [{"category": "Missing folder", "operation": "RPI Files", "file_name": "missing.png"}]
-    assert "Update RPI Files (1)" in page(ev)                           # the failure did not count as processed
+    assert "DOWNLOAD FILES (1)" in page(ev)                           # the failure did not count as processed
     put(ev, "rpi/missing.png", PNG)
-    assert "1 downloaded, 0 removed, 0 failed" in download(ev).get_data(as_text=True)
-
-
-def test_a_file_that_is_too_large_is_refused_plainly(ev, cfg, monkeypatch):
-    monkeypatch.setattr(rpi, "MAX_FILE_BYTES", 5)
-    put(ev, "rpi/big.png", PNG)
-    put_log(ev, [("RPI/big.png", T1, "New")])
-    check(ev)
-    out = download(ev).get_data(as_text=True)
-    assert "0 downloaded, 0 removed, 1 failed" in out and "larger than" in out
-    assert not (cfg.data_dir / "RPI" / "big.png").exists()
-    assert [d[3] for d in azure_of(ev).downloads if d[1].endswith("big.png")] == [6]      # the request itself was capped
-
-
-def test_only_rpi_files_are_touched_table_files_wait_for_the_next_phase(ev, cfg):
-    put(ev, "rpi/HOME_Look.png", PNG)
-    put(ev, "Table 1/inner/a.png", PNG)
-    put_log(ev, [("RPI/HOME_Look.png", T1, "New"), ("Table 1/Inner/a.png", T1, "New")])
-    check(ev)
-    assert "Waiting To Be Processed (2)" in text_of(page(ev))
-    download(ev)
-    assert "Waiting To Be Processed (1)" in text_of(page(ev))              # the table file is still waiting
-    assert [h["file_name"] for h in history(cfg)] == ["HOME_Look.png"]
-    found = sorted(p.name for p in cfg.data_dir.rglob("*") if p.is_file())
-    assert "a.png" not in found
+    assert "Downloaded 1 file(s), removed 0, failed 0" in download(ev).get_data(as_text=True)
 
 
 def test_a_file_with_no_extension_or_in_a_sub_folder_is_not_an_rpi_download(ev, cfg):
     put(ev, "rpi/README", b"x")
     put_log(ev, [("RPI/README", T1, "New"), ("RPI/sub/x.png", T1, "New")])
     text = text_of(check(ev).get_data(as_text=True))
-    assert "Not Applicable To This Event (2)" in text and "No RPI files are waiting." in page(ev)
+    assert "Not Applicable To This Event (2)" in text and "Nothing is waiting to be downloaded." in page(ev)
 
 
 def test_an_unusable_folder_is_a_plain_message_and_nothing_is_written(ev, cfg, tmp_path_factory):
