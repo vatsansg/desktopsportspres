@@ -129,3 +129,34 @@ def test_step_4_2_registers_the_real_event_end_to_end_through_the_app(cfg, monke
     # a second registration of the same event is a harmless no-op
     again = client.post("/events/new", data={"event_id": "1000", "csrf_token": csrf_from(client, "/events/new")})
     assert again.status_code == 302 and len(db_rows(cfg, "SELECT * FROM events")) == 1
+
+
+def test_phase6_downloads_parses_and_compares_the_real_change_log(cfg):
+    """Step 6.1 / 6.3 against the REAL event: the whole check, read-only, through the real page."""
+    from ledsync.db import connect, init_db
+    from ledsync.services import auth
+    init_db(cfg.db_path)
+    conn = connect(cfg.db_path)
+    auth.seed_admin(conn)
+    cs.save_cloud(conn, ACCOUNT, CONTAINER, KEY)
+    conn.close()
+    app = create_app(cfg)
+    app.config["ALLOWED_HOSTS"] = frozenset({"localhost"})
+    client = app.test_client()
+    client.get(f"/_launch?t={app.config['LAUNCH_TOKEN']}")
+    client.post("/login", data={"username": "admin", "password": auth.DEFAULT_PASSWORD,
+                                "csrf_token": csrf_from(client, "/login")})
+    client.post("/events/new", data={"event_id": "1000", "csrf_token": csrf_from(client, "/events/new")})
+
+    resp = client.post("/events/1000/changes/check",
+                       data={"csrf_token": csrf_from(client, "/events/1000/changes")}, follow_redirects=True)
+    html = resp.get_data(as_text=True)
+    text = re.sub(r"\s+", " ", re.sub(r"<[^>]+>", " ", html))
+    assert resp.status_code == 200 and "Nothing was downloaded or changed" in html and KEY not in html
+    assert "file _ledassetschangelog.csv" in text
+    # The real log holds Table 1 Inner AND Outer sponsorsequence.csv as distinct files (web BRD v2.4).
+    assert "Table 1 Inner sponsorsequence.csv" in text and "Table 1 Outer sponsorsequence.csv" in text
+    assert "RPI/HOME_Look.png" in html                               # the one entry outside any table folder
+    # nothing local was created or changed by a check
+    assert db_rows(cfg, "SELECT COUNT(*) AS n FROM download_history")[0]["n"] == 0
+    assert (cfg.data_dir / "_localchangelog.csv").read_text(encoding="utf-8-sig").count("\n") == 1   # headers only

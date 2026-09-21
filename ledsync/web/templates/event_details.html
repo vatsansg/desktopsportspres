@@ -5,7 +5,8 @@
 <main class="page">
   <p class="crumb"><a href="{{ url_for('views.dashboard') }}">&larr; Dashboard</a></p>
   <h1>{{ event.event_name }}</h1>
-  <p class="lede">Event {{ event.event_id }} &middot; {{ event.status or "Registered" }}</p>
+  <p class="lede">Event {{ event.event_id }} &middot; {{ event.status or "Registered" }}
+    &middot; <a href="{{ url_for('changes.page', event_id=event.event_id) }}">Change Log</a></p>
 
   {% for category, message in get_flashed_messages(with_categories=true) %}
   <p class="alert alert-{{ category }}" role="{{ 'alert' if category == 'error' else 'status' }}">{{ message }}</p>
