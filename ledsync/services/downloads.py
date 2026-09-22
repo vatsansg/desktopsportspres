@@ -18,6 +18,7 @@ from dataclasses import dataclass, field
 from ..db import connect
 from . import assets, changes, eventstatus, localchangelog, localfiles, oplog, rpi, sync
 from . import settings as cloud_settings
+from . import transfer
 from .progress import Progress
 from .storage import EventLocation
 from .transfer import TransferResult
@@ -189,9 +190,20 @@ def run_job(config, storage_factory, settings, event_id: str, progress: Progress
     return lines
 
 
+def _apply_retry_settings(conn) -> tuple:
+    """Settings -> Download (Phase 10) governs both the download and push retry behaviour, which both read
+    `transfer.RETRY_COUNT` / `transfer.RETRY_DELAY` directly. Returns the previous values to restore afterwards, so a
+    job never leaves those globals changed for anything that runs after it (including, in tests, a later test)."""
+    saved = cloud_settings.load_download_settings(conn)
+    old = (transfer.RETRY_COUNT, transfer.RETRY_DELAY)
+    transfer.RETRY_COUNT, transfer.RETRY_DELAY = saved.retry_count, saved.retry_delay
+    return old
+
+
 def _run_job(config, storage_factory, settings, event_id: str, progress: Progress, tz=None, on_report=None, *,
              download: bool = True, push: bool = True, checker=None) -> list[dict]:
     conn = connect(config.db_path)
+    old_retry = _apply_retry_settings(conn)
     try:
         progress.phase = "Checking"
         canonical = conn.execute("SELECT event_id FROM events WHERE event_id = ? COLLATE NOCASE", (event_id,)).fetchone()
@@ -266,6 +278,7 @@ def _run_job(config, storage_factory, settings, event_id: str, progress: Progres
         return lines
     finally:
         conn.close()
+        transfer.RETRY_COUNT, transfer.RETRY_DELAY = old_retry
 
 
 def run_download(config, storage_factory, settings, event_id: str, progress: Progress, tz=None, on_report=None) -> list[dict]:

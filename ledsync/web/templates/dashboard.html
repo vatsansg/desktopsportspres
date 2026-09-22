@@ -40,10 +40,18 @@
             <td class="nowrap">{{ e.last_updated }}</td>
             <td><span class="badge badge-{{ e.status_key }}">{{ e.status }}</span></td>
             <td class="nowrap">
-              <form method="post" action="{{ url_for('sync.start', event_id=e.event_id) }}" class="inline-form" novalidate data-busy-text="STARTING…">
-                <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
-                <button type="submit" class="btn btn-secondary btn-sm" data-busy-label="Starting…" aria-label="Download &amp; Sync event {{ e.event_id }}">Download &amp; Sync</button>
-              </form>
+              <div class="action-group">
+                <form method="post" action="{{ url_for('sync.start', event_id=e.event_id) }}" class="inline-form" novalidate data-busy-text="STARTING…">
+                  <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+                  <button type="submit" class="btn btn-secondary btn-sm" data-busy-label="Starting…" aria-label="Download &amp; Sync event {{ e.event_id }}">Download &amp; Sync</button>
+                </form>
+                <form method="post" action="{{ url_for('devices.save_or_test', event_id=e.event_id) }}" class="inline-form" novalidate data-busy-text="TESTING…">
+                  <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+                  <input type="hidden" name="action" value="test-all">
+                  <button type="submit" class="btn btn-secondary btn-sm" data-busy-label="Testing…" aria-label="Test connections for event {{ e.event_id }}">Test Connections</button>
+                </form>
+                <a class="btn btn-secondary btn-sm" href="{{ url_for('logs.page', event=e.event_id) }}" aria-label="View logs for event {{ e.event_id }}">View Logs</a>
+              </div>
             </td>
           </tr>
           {% endfor %}

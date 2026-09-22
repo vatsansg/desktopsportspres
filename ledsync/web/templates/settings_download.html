@@ -1,0 +1,49 @@
+{% extends "base.html" %}
+{% block title %}Download Settings — {{ app_name }}{% endblock %}
+{% block body %}
+{% include "_topbar.html" %}
+<main class="page page-medium">
+  {% for category, message in get_flashed_messages(with_categories=true) %}
+  <p class="alert alert-{{ category }}" role="status">{{ message }}</p>
+  {% endfor %}
+  <h1>Settings</h1>
+  {% set section = 'download' %}{% include "_settings_nav.html" %}
+  <h2 class="settings-section">Download</h2>
+  <p class="lede">How a download or push handles a connection problem or a bad copy. The same setting governs both directions.</p>
+
+  {% if error %}
+  <p id="form-error" data-focus-alert class="alert alert-error" role="alert">{{ error }}</p>
+  {% endif %}
+
+  <form method="post" action="{{ url_for('settings.download_post') }}" class="panel" novalidate data-busy-text="WORKING…">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+    <div class="field">
+      <label for="retry_count">Retries after a failure</label>
+      <input id="retry_count" name="retry_count" type="number" min="0" max="5" step="1" value="{{ retry_count_typed }}"
+             inputmode="numeric" {% if not error %}autofocus{% endif %} aria-describedby="{% if error %}form-error {% endif %}retry-count-hint">
+      <p id="retry-count-hint" class="hint">How many more times a file is tried after a connection problem or a copy that failed to verify,
+        0 to 5. Leave the box empty to use the default (<span class="mono">{{ saved.retry_count }}</span>).</p>
+    </div>
+    <div class="field">
+      <label for="retry_delay">Pause between tries (seconds)</label>
+      <input id="retry_delay" name="retry_delay" type="number" min="0" max="60" step="0.5" value="{{ retry_delay_typed }}"
+             inputmode="decimal" aria-describedby="retry-delay-hint">
+      <p id="retry-delay-hint" class="hint">How long to wait before each retry, 0 to 60 seconds. Leave the box empty to use the default
+        (<span class="mono">{{ saved.retry_delay }}</span>).</p>
+    </div>
+    <dl class="kv">
+      <dt>Download location</dt>
+      <dd>Set on the <a href="{{ url_for('settings.folders') }}">Local Folders</a> page.</dd>
+      <dt>Change-log location</dt>
+      <dd class="mono">{{ change_log_path }}</dd>
+      <dt>Synchronisation behaviour</dt>
+      <dd>Fixed, not configurable: a copy is read back and compared by size and MD5 before it takes its name; a file this application did
+        not push is replaced; a removal from a device only ever removes a file this application put there.</dd>
+    </dl>
+    <div class="form-actions">
+      <button type="submit" class="btn btn-primary">SAVE SETTINGS</button>
+      <a class="btn btn-secondary" href="{{ url_for('views.dashboard') }}">Back to Dashboard</a>
+    </div>
+  </form>
+</main>
+{% endblock %}

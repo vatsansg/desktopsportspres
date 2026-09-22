@@ -79,6 +79,7 @@
       <li class="chip"><span class="badge badge-attention">Removed In Cloud</span> <strong>{{ n_removed }}</strong></li>
       <li class="chip"><span class="badge badge-synced">Already Processed</span> <strong>{{ done.total }}</strong></li>
       <li class="chip"><span class="badge badge-other">Not Applicable</span> <strong>{{ na.total }}</strong></li>
+      {% if cutoff_skipped.total %}<li class="chip"><span class="badge badge-other">Skipped (Before Cut-Off)</span> <strong>{{ cutoff_skipped.total }}</strong></li>{% endif %}
       <li class="chip"><span class="badge badge-other">Unreadable Rows</span> <strong>{{ comparison.skipped|length }}</strong></li>
     </ul>
   </section>
@@ -162,6 +163,27 @@
       </table>
     </div>
     {% if na.total > na.rows|length %}<p class="hint">Showing the first {{ na.limit }} of {{ na.total }}.</p>{% endif %}
+  </details>
+  {% endif %}
+
+  {% if cutoff_skipped.total %}
+  <details class="block hidden-maps">
+    <summary>Skipped, Before Cut-Off ({{ cutoff_skipped.total }})</summary>
+    <p class="hint">These are new, updated or removed in the cloud, but timestamped before this event's timestamp cut-off
+      (set on the <a href="{{ url_for('devices.details', event_id=event.event_id) }}">Device Mapping</a> page), so they were not downloaded.</p>
+    <div class="table-wrap" tabindex="0" role="region" aria-label="Entries skipped because of the timestamp cut-off">
+      <table class="data-table">
+        <caption class="sr-only">Entries skipped because of the timestamp cut-off</caption>
+        <thead><tr><th scope="col">Table</th><th scope="col">LED</th><th scope="col">File</th><th scope="col">Changed</th><th scope="col">Note</th></tr></thead>
+        <tbody>
+          {% for r in cutoff_skipped.rows %}
+          <tr><td class="nowrap">{% if r.table is not none %}Table {{ r.table }}{% else %}&mdash;{% endif %}</td><td class="nowrap">{{ r.led }}</td><td>{{ r.file }}</td>
+              <td class="nowrap">{{ r.changed }}</td><td>{{ r.reason }}</td></tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+    {% if cutoff_skipped.total > cutoff_skipped.rows|length %}<p class="hint">Showing the first {{ cutoff_skipped.limit }} of {{ cutoff_skipped.total }}.</p>{% endif %}
   </details>
   {% endif %}
 

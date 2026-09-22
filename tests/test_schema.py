@@ -30,7 +30,7 @@ BRD_SECTION_26_COLUMNS = {
 
 # Approved extensions (20 Sep 2026): Section 7.1 config JSON + Section 21.1 exception fields.
 APPROVED_EXTENSIONS = {
-    "events": {"configuration_json"},
+    "events": {"configuration_json", "cutoff_timestamp"},
     "exception_log": {"table_number", "led_type", "file_name", "source", "destination"},
 }
 
@@ -153,3 +153,27 @@ def test_init_creates_missing_parent_directory(tmp_path):
     db = tmp_path / "nested" / "deeper" / "ledsync.db"
     init_db(db)
     assert db.exists()
+
+
+def test_a_database_from_before_phase_10_gains_the_cutoff_column_in_the_right_place(cfg):
+    """`CREATE TABLE IF NOT EXISTS` never alters a table that already exists, so an upgrade from an
+    earlier version needs its own step - added at the END, matching a fresh database's column order."""
+    conn = sqlite3.connect(cfg.db_path)
+    try:
+        conn.execute("CREATE TABLE events (event_id TEXT PRIMARY KEY, event_name TEXT NOT NULL, event_guid TEXT, "
+                     "configuration_file TEXT, configuration_json TEXT, configuration_version TEXT, "
+                     "last_updated TEXT, last_download TEXT, last_sync TEXT, status TEXT)")
+        conn.execute("INSERT INTO events (event_id, event_name) VALUES ('1000', 'Old Event')")
+        conn.commit()
+    finally:
+        conn.close()
+    init_db(cfg.db_path)                                          # the "upgrade"
+    conn = connect(cfg.db_path)
+    try:
+        assert [r["name"] for r in conn.execute("PRAGMA table_info(events)")] == TABLES["events"]
+        row = conn.execute("SELECT event_name, cutoff_timestamp FROM events WHERE event_id = '1000'").fetchone()
+        assert row["event_name"] == "Old Event" and row["cutoff_timestamp"] is None    # the old row survives untouched
+        init_db(cfg.db_path)                                       # running it again is a no-op
+        assert [r["name"] for r in conn.execute("PRAGMA table_info(events)")] == TABLES["events"]
+    finally:
+        conn.close()

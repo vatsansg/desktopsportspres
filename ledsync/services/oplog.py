@@ -99,3 +99,16 @@ def query(conn: sqlite3.Connection, *, event_id: str = "", operation: str = "", 
     rows = conn.execute("SELECT * FROM operation_log" + clause + " ORDER BY log_id DESC LIMIT ? OFFSET ?",
                         [*args, max(1, min(int(limit), 100000)), max(0, min(int(offset), 10**15))]).fetchall()
     return rows, total
+
+
+def prune(conn: sqlite3.Connection, before_iso: str) -> int:
+    """Delete operational-log rows older than `before_iso` (a UTC ISO timestamp). Returns the number removed.
+    Never raises outward - a failed prune must not stop the application from starting."""
+    try:
+        n = conn.execute("DELETE FROM operation_log WHERE timestamp < ?", (before_iso,)).rowcount
+        conn.commit()
+        return n
+    except sqlite3.Error:
+        conn.rollback()
+        log.exception("Could not prune the operational log")
+        return 0

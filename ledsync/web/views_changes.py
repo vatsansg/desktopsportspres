@@ -91,6 +91,7 @@ def page(event_id):
                                          (c.with_action(changes.DELETE) + c.with_action(changes.DOWNLOAD))[:SHOW_LIMIT]],
                                    limit=SHOW_LIMIT),
                    done=_section(c, changes.DONE, tz), na=_section(c, changes.NOT_APPLICABLE, tz),
+                   cutoff_skipped=_section(c, changes.SKIPPED_CUTOFF, tz),
                    n_new=c.count_label(changes.LABEL_NEW), n_updated=c.count_label(changes.LABEL_UPDATED),
                    n_removed=c.count_label(changes.LABEL_REMOVED), n_unlogged=c.count_label(changes.LABEL_NEW_UNLOGGED),
                    skipped=c.skipped[:20], future=report.future_dated, rpi_waiting=n_rpi, asset_waiting=n_assets,

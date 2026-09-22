@@ -1,4 +1,5 @@
-"""Cloud Storage settings (BRD Section 14) - the ONLY module that reads or writes them.
+"""Application Settings (BRD Section 14) - the ONLY module that reads or writes them (all of `application_settings`
+except the admin credential, which stays in `auth.py`).
 
 Stored in `application_settings`:
     cloud_storage_account   e.g. sasportspresentation
@@ -8,6 +9,12 @@ Stored in `application_settings`:
                             sub-folder per event (empty = the default `RPI` folder in the application data folder)
     asset_folder            where the Table / LED files are saved: <folder>\\<Event ID>\\Table N\\<LED type>
                             (empty = the default `Events` folder in the application data folder)
+    download_retry_count    extra tries after a transient download/push failure (Phase 10; blank = built-in default)
+    download_retry_delay    seconds paused before each retry (Phase 10; blank = built-in default)
+    log_retention_days      keep operational/exception log rows for this many days (Phase 10; blank = forever)
+    schedule_*              day(s)/time/enabled for a scheduled run (Phase 10 stores it; Phase 12 runs it)
+    email_*                 recipient/enabled/connection string for the completion notification (Phase 10 stores
+                            it; Phase 11 sends it, via Azure Communication Services - see the note further down)
 
 OWNER DECISION (21/09/26): the access key is stored as PLAIN TEXT in the database. This
 departs from BRD 33.3 ("must not be stored as plain text where avoidable") and is recorded
@@ -344,3 +351,276 @@ def _validate_asset_folder(text: str, data_dir) -> str:
         return mappings.validate_shared_folder(value, "Asset folder", forbidden_roots=(data_dir,))
     except mappings.MappingError as err:
         raise SettingsError(f"{err} Leave the box empty to use the default asset folder.") from None
+
+
+# --- download settings: retry count / delay (BRD 14, Phase 10) ---------------------------------------------------
+#
+# Blank (the default, like the two folders above) means "use the application's own default", which is read live
+# from `transfer.RETRY_COUNT` / `transfer.RETRY_DELAY` rather than a value frozen here - so a test that monkeypatches
+# those constants (or a future change to the built-in default) is reflected without also updating this module.
+
+KEY_RETRY_COUNT = "download_retry_count"
+KEY_RETRY_DELAY = "download_retry_delay"
+RETRY_COUNT_RANGE = (0, 5)
+RETRY_DELAY_RANGE = (0.0, 60.0)
+
+
+@dataclass(frozen=True)
+class DownloadSettings:
+    retry_count: int                   # effective value (the saved one, or the built-in default)
+    retry_delay: float
+    saved_retry_count: str             # "" = using the default; otherwise what was saved, as typed
+    saved_retry_delay: str
+
+    @property
+    def retry_count_is_default(self) -> bool:
+        return not self.saved_retry_count
+
+    @property
+    def retry_delay_is_default(self) -> bool:
+        return not self.saved_retry_delay
+
+
+def load_download_settings(conn: sqlite3.Connection) -> DownloadSettings:
+    from . import transfer                                     # local import: transfer does not import settings
+    raw_count, raw_delay = _get(conn, KEY_RETRY_COUNT).strip(), _get(conn, KEY_RETRY_DELAY).strip()
+    return DownloadSettings(
+        int(raw_count) if raw_count else transfer.RETRY_COUNT, float(raw_delay) if raw_delay else transfer.RETRY_DELAY,
+        raw_count, raw_delay)
+
+
+def validate_retry_count(text: str) -> str:
+    value = (text or "").strip()
+    if not value:
+        return ""
+    try:
+        n = int(value)
+    except ValueError:
+        raise SettingsError(f"Enter a whole number of retries, {RETRY_COUNT_RANGE[0]} to {RETRY_COUNT_RANGE[1]}, "
+                            "or leave it blank for the default.") from None
+    if not (RETRY_COUNT_RANGE[0] <= n <= RETRY_COUNT_RANGE[1]):
+        raise SettingsError(f"The number of retries must be {RETRY_COUNT_RANGE[0]} to {RETRY_COUNT_RANGE[1]}.")
+    return str(n)
+
+
+def validate_retry_delay(text: str) -> str:
+    value = (text or "").strip()
+    if not value:
+        return ""
+    try:
+        n = float(value)
+    except ValueError:
+        raise SettingsError(f"Enter the delay in seconds, {RETRY_DELAY_RANGE[0]:.0f} to {RETRY_DELAY_RANGE[1]:.0f}, "
+                            "or leave it blank for the default.") from None
+    if not (RETRY_DELAY_RANGE[0] <= n <= RETRY_DELAY_RANGE[1]):
+        raise SettingsError(f"The delay between retries must be {RETRY_DELAY_RANGE[0]:.0f} to "
+                            f"{RETRY_DELAY_RANGE[1]:.0f} seconds.")
+    return str(n)
+
+
+def save_download_settings(conn: sqlite3.Connection, retry_count_text: str, retry_delay_text: str) -> list[str]:
+    count, delay = validate_retry_count(retry_count_text), validate_retry_delay(retry_delay_text)
+    changed = []
+    try:
+        if _get(conn, KEY_RETRY_COUNT) != count:
+            _put(conn, KEY_RETRY_COUNT, count)
+            changed.append("retry count")
+        if _get(conn, KEY_RETRY_DELAY) != delay:
+            _put(conn, KEY_RETRY_DELAY, delay)
+            changed.append("retry delay")
+        oplog.add(conn, "Settings Changed", "Success",
+                  f"Download settings saved ({', '.join(changed)} changed)." if changed else "Download settings saved (no change).")
+        conn.commit()
+    except sqlite3.Error:
+        conn.rollback()
+        raise SettingsError("The settings could not be saved. Try again.") from None
+    return changed
+
+
+# --- log retention (carried from Phase 9, F-65) ------------------------------------------------------------------
+
+KEY_LOG_RETENTION = "log_retention_days"
+LOG_RETENTION_RANGE = (1, 3650)
+
+
+@dataclass(frozen=True)
+class RetentionSettings:
+    saved: str                 # "" = forever
+    days: int | None           # None = forever
+
+
+def load_log_retention(conn: sqlite3.Connection) -> RetentionSettings:
+    saved = _get(conn, KEY_LOG_RETENTION).strip()
+    return RetentionSettings(saved, int(saved) if saved else None)
+
+
+def validate_log_retention(text: str) -> str:
+    value = (text or "").strip()
+    if not value:
+        return ""
+    try:
+        n = int(value)
+    except ValueError:
+        raise SettingsError("Enter a whole number of days, or leave it blank to keep logs forever.") from None
+    if not (LOG_RETENTION_RANGE[0] <= n <= LOG_RETENTION_RANGE[1]):
+        raise SettingsError(f"Keep logs for {LOG_RETENTION_RANGE[0]} to {LOG_RETENTION_RANGE[1]} days, "
+                            "or leave it blank to keep them forever.")
+    return str(n)
+
+
+def save_log_retention(conn: sqlite3.Connection, text: str) -> bool:
+    value = validate_log_retention(text)
+    try:
+        changed = _get(conn, KEY_LOG_RETENTION) != value
+        if changed:
+            _put(conn, KEY_LOG_RETENTION, value)
+        oplog.add(conn, "Settings Changed", "Success",
+                  (f"Log retention saved (keep for {value} day(s))." if value else "Log retention saved (keep forever).")
+                  if changed else "Log retention saved (no change).")
+        conn.commit()
+    except sqlite3.Error:
+        conn.rollback()
+        raise SettingsError("The settings could not be saved. Try again.") from None
+    return changed
+
+
+# --- scheduling settings (BRD 14/22; storage only - Phase 12 runs the schedule) ------------------------------------
+
+KEY_SCHEDULE_ENABLED = "schedule_enabled"
+KEY_SCHEDULE_DAYS = "schedule_days"
+KEY_SCHEDULE_TIME = "schedule_time"
+SCHEDULE_DAYS = ("Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun")
+_TIME_RE = re.compile(r"^([01]\d|2[0-3]):([0-5]\d)$")
+
+
+@dataclass(frozen=True)
+class ScheduleSettings:
+    enabled: bool
+    days: tuple                # a subset of SCHEDULE_DAYS, in week order
+    time: str                  # "" or "HH:MM" (24-hour)
+
+
+def load_schedule(conn: sqlite3.Connection) -> ScheduleSettings:
+    raw_days = _get(conn, KEY_SCHEDULE_DAYS)
+    days = tuple(d for d in SCHEDULE_DAYS if d in raw_days.split(",")) if raw_days else ()
+    return ScheduleSettings(_get(conn, KEY_SCHEDULE_ENABLED) == "1", days, _get(conn, KEY_SCHEDULE_TIME))
+
+
+def validate_schedule_time(text: str) -> str:
+    value = (text or "").strip()
+    if not value:
+        return ""
+    if not _TIME_RE.match(value):
+        raise SettingsError("Enter the time as HH:MM in 24-hour format (for example 02:30), or leave it blank.")
+    return value
+
+
+def _validate_schedule_days(values) -> str:
+    return ",".join(d for d in SCHEDULE_DAYS if d in (values or ()))    # fixed order; anything else forged is dropped
+
+
+def save_schedule(conn: sqlite3.Connection, enabled: bool, days, time_text: str) -> list[str]:
+    days_value, time_value = _validate_schedule_days(days), validate_schedule_time(time_text)
+    if enabled and (not days_value or not time_value):
+        raise SettingsError("Choose at least one day and a time before enabling the schedule.")
+    enabled_value = "1" if enabled else "0"
+    changed = []
+    try:
+        if _get(conn, KEY_SCHEDULE_ENABLED) != enabled_value:
+            _put(conn, KEY_SCHEDULE_ENABLED, enabled_value)
+            changed.append("enabled")
+        if _get(conn, KEY_SCHEDULE_DAYS) != days_value:
+            _put(conn, KEY_SCHEDULE_DAYS, days_value)
+            changed.append("days")
+        if _get(conn, KEY_SCHEDULE_TIME) != time_value:
+            _put(conn, KEY_SCHEDULE_TIME, time_value)
+            changed.append("time")
+        oplog.add(conn, "Settings Changed", "Success",
+                  f"Scheduling settings saved ({', '.join(changed)} changed)." if changed else "Scheduling settings saved (no change).")
+        conn.commit()
+    except sqlite3.Error:
+        conn.rollback()
+        raise SettingsError("The settings could not be saved. Try again.") from None
+    return changed
+
+
+# --- email settings (BRD 14/23; storage only - Phase 11 sends the notification) -------------------------------------
+#
+# DEVIATION (22 Sep 2026): BRD Section 14 lists SMTP server/port/username/authentication fields, but the Desktop BRD
+# Addendum A Section 39.3 (confirmed 20 Sep 2026, before this phase) supersedes that: the email mechanism is Azure
+# Communication Services, the same service the web application uses. SMTP fields would be built only to be thrown
+# away once Phase 11 arrives, so this page stores what Phase 11 actually needs instead: the recipient, whether
+# notifications are on, and a connection string (handled exactly like the storage access key - never echoed back,
+# never logged) ready for the connection details BRD 39.3 says will be supplied when that phase starts.
+
+KEY_EMAIL_ENABLED = "email_enabled"
+KEY_EMAIL_RECIPIENT = "email_recipient"
+KEY_EMAIL_CONNECTION = "email_connection_string"
+_EMAIL_RE = re.compile(r"^[^@\s]+@[^@\s]+\.[^@\s]+$")     # a plain shape check, not full RFC 5322
+_CONNECTION_LENGTH = (20, 2000)
+
+
+@dataclass(frozen=True)
+class EmailSettings:
+    enabled: bool
+    recipient: str
+    has_connection: bool
+
+
+def load_email(conn: sqlite3.Connection) -> EmailSettings:
+    return EmailSettings(_get(conn, KEY_EMAIL_ENABLED) == "1", _get(conn, KEY_EMAIL_RECIPIENT),
+                         bool(_get(conn, KEY_EMAIL_CONNECTION)))
+
+
+def validate_email_recipient(text: str) -> str:
+    value = (text or "").strip()
+    if not value:
+        return ""
+    if looks_like_secret(value) or len(value) > 200 or not _EMAIL_RE.match(value):
+        raise SettingsError("Enter a valid email address, or leave it blank.")
+    return value
+
+
+def validate_email_connection(text: str) -> str:
+    value = (text or "").strip()
+    if not value:
+        return ""
+    if not (_CONNECTION_LENGTH[0] <= len(value) <= _CONNECTION_LENGTH[1]):
+        raise SettingsError("That does not look like an Azure Communication Services connection string.")
+    return value
+
+
+def save_email(conn: sqlite3.Connection, enabled: bool, recipient_text: str, connection_text: str) -> list[str]:
+    """`connection_text` empty keeps the existing connection string (like the storage access key)."""
+    recipient = validate_email_recipient(recipient_text)
+    connection = validate_email_connection(connection_text) if (connection_text or "").strip() else None
+    if enabled and not recipient:
+        raise SettingsError("Enter the notification email address before turning notifications on.")
+    enabled_value = "1" if enabled else "0"
+    changed = []
+    try:
+        if _get(conn, KEY_EMAIL_ENABLED) != enabled_value:
+            _put(conn, KEY_EMAIL_ENABLED, enabled_value)
+            changed.append("enabled")
+        if _get(conn, KEY_EMAIL_RECIPIENT) != recipient:
+            _put(conn, KEY_EMAIL_RECIPIENT, recipient)
+            changed.append("recipient")
+        if connection is not None and connection != _get(conn, KEY_EMAIL_CONNECTION):
+            _put(conn, KEY_EMAIL_CONNECTION, connection)
+            changed.append("connection string")
+        oplog.add(conn, "Settings Changed", "Success",
+                  f"Email settings saved ({', '.join(changed)} changed)." if changed else "Email settings saved (no change).")
+        conn.commit()
+    except sqlite3.Error:
+        conn.rollback()
+        raise SettingsError("The settings could not be saved. Try again.") from None
+    return changed
+
+
+# All the keys this module is allowed to touch (see the SCOPE GUARD note at the top of the file).
+# Appended here, after every KEY_* constant above is defined.
+OWNED_KEYS = OWNED_KEYS | {
+    KEY_RETRY_COUNT, KEY_RETRY_DELAY, KEY_LOG_RETENTION,
+    KEY_SCHEDULE_ENABLED, KEY_SCHEDULE_DAYS, KEY_SCHEDULE_TIME,
+    KEY_EMAIL_ENABLED, KEY_EMAIL_RECIPIENT, KEY_EMAIL_CONNECTION,
+}

@@ -163,14 +163,19 @@ def _resolve(conn, event_id, item: SyncItem) -> None:
 
 
 def _retry(action):
-    """One more try after a short pause for a transient network problem or a copy that did not verify."""
-    try:
-        return action()
-    except (localfiles.IntegrityError, localfiles.DeviceError) as err:
-        if isinstance(err, localfiles.DeviceError) and err.category != exceptions.NETWORK_DEVICE:
-            raise
-        time.sleep(transfer.RETRY_DELAY)
-        return action()
+    """`transfer.RETRY_COUNT` more tries, each after `transfer.RETRY_DELAY` seconds, for a transient network problem
+    or a copy that did not verify (the same Settings -> Download configuration governs both download and push)."""
+    attempt = 0
+    while True:
+        try:
+            return action()
+        except (localfiles.IntegrityError, localfiles.DeviceError) as err:
+            if isinstance(err, localfiles.DeviceError) and err.category != exceptions.NETWORK_DEVICE:
+                raise
+            attempt += 1
+            if attempt > transfer.RETRY_COUNT:
+                raise
+            time.sleep(transfer.RETRY_DELAY)
 
 
 def process(conn: sqlite3.Connection, event_id: str, items: list[SyncItem], data_dir, progress=None, checker=None,

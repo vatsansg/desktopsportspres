@@ -9,10 +9,12 @@ import argparse
 import logging
 import sys
 import time
+from datetime import datetime, timedelta, timezone
 
 from . import APP_NAME, __version__, config, logging_setup, platform_checks
 from .db import connect, init_db
-from .services import auth, oplog
+from .services import auth, exceptions, oplog
+from .services import settings as cloud_settings
 from .web import create_app, start_server
 
 log = logging.getLogger("ledsync")
@@ -37,10 +39,24 @@ def _auto_close(window, seconds: float) -> None:
     window.destroy()
 
 
+def _prune_logs(conn) -> None:
+    """Settings -> Application's log retention (Phase 10, carried from Phase 9 F-65); blank = keep forever, the
+    default. Runs before the startup row is written, so a fresh install's very first row is never itself pruned."""
+    retention = cloud_settings.load_log_retention(conn)
+    if retention.days is None:
+        return
+    before = (datetime.now(timezone.utc) - timedelta(days=retention.days)).strftime("%Y-%m-%dT%H:%M:%SZ")
+    removed = oplog.prune(conn, before) + exceptions.prune(conn, before)
+    if removed:
+        oplog.record(conn, "Application Startup", "Success",
+                     f"Log retention: removed {removed} row(s) older than {retention.days} day(s).")
+
+
 def _seed_and_log_startup(cfg: config.Config) -> None:
     conn = connect(cfg.db_path)
     try:
         auth.seed_admin(conn)
+        _prune_logs(conn)
         oplog.record(conn, "Application Startup", "Success", f"{APP_NAME} v{__version__} started.")
     finally:
         conn.close()

@@ -75,13 +75,21 @@ h2 { font-size: 1.5rem; }
 .field { margin-bottom: 1.25rem; }
 label { display: block; font-weight: 700; margin-bottom: 0.4rem; }
 
-input[type="text"], input[type="password"], input[type="email"], input[type="number"] {
+input[type="text"], input[type="password"], input[type="email"], input[type="number"], input[type="time"] {
   font: inherit; color: var(--text); background: var(--surface-raised);
   border: 2px solid var(--border); border-radius: 4px;
-  width: 100%; min-height: 44px; padding: 0 0.75rem;
+  width: 100%; min-height: 44px; padding: 0 0.75rem; color-scheme: dark;
 }
 input:hover { border-color: var(--wtt-white); }
 input:focus-visible { border-color: var(--wtt-blue); outline-offset: 0; }
+
+fieldset { border: 2px solid var(--border); border-radius: 4px; padding: 0.75rem 1rem 1rem; margin: 0; }
+legend { font-weight: 700; padding: 0 0.4rem; }
+.checkbox-label { display: flex; align-items: center; gap: 0.5rem; font-weight: 400; cursor: pointer; }
+.checkbox-label input[type="checkbox"] {
+  width: 1.15rem; height: 1.15rem; accent-color: var(--wtt-blue); border: 2px solid var(--border); cursor: pointer;
+}
+.day-choices { display: flex; flex-wrap: wrap; gap: 0.75rem 1.5rem; }
 
 .input-group { display: flex; }
 .input-group input { border-top-right-radius: 0; border-bottom-right-radius: 0; border-right: 0; }
@@ -93,6 +101,7 @@ input:focus-visible { border-color: var(--wtt-blue); outline-offset: 0; }
 .input-addon:hover { border-color: var(--wtt-white); }
 
 .form-actions { display: flex; gap: 0.75rem; margin-top: 0.5rem; }
+.action-group { display: flex; flex-wrap: wrap; gap: 0.5rem; }
 
 /* ---- Alerts ---- */
 .alert {

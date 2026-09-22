@@ -26,7 +26,8 @@ from .storage import StorageError
 log = logging.getLogger(__name__)
 
 MAX_FILES_PER_RUN = 2000
-RETRY_DELAY = 2.0                                 # seconds before the single automatic retry
+RETRY_COUNT = 1                                   # extra tries after the first (Settings -> Download, Phase 10)
+RETRY_DELAY = 2.0                                 # seconds before each automatic retry (Settings -> Download, Phase 10)
 STOP_CATEGORIES = (exceptions.STORAGE_CONNECTIVITY, exceptions.PERMISSION)
 
 
@@ -67,15 +68,21 @@ def history(conn, event_id, item, table, led_type, source: str, local: str, stat
 
 
 def _retry(action):
-    """Run `action`; a transient problem (connection, wrong checksum) gets ONE more try after a short pause."""
-    try:
-        return action()
-    except (StorageError, localfiles.IntegrityError) as err:
-        changed = isinstance(err, StorageError) and err.category == exceptions.DOWNLOAD and "changed in Azure" in err.message
-        if isinstance(err, StorageError) and err.category not in STOP_CATEGORIES and not changed:
-            raise
-        time.sleep(RETRY_DELAY)
-        return action()
+    """Run `action`; a transient problem (connection, wrong checksum) gets `RETRY_COUNT` more tries, each after a pause
+    of `RETRY_DELAY` seconds - both read fresh on every call, so a Settings change (or a test's monkeypatch) takes
+    effect immediately without threading a parameter through every caller."""
+    attempt = 0
+    while True:
+        try:
+            return action()
+        except (StorageError, localfiles.IntegrityError) as err:
+            changed = isinstance(err, StorageError) and err.category == exceptions.DOWNLOAD and "changed in Azure" in err.message
+            if isinstance(err, StorageError) and err.category not in STOP_CATEGORIES and not changed:
+                raise
+            attempt += 1
+            if attempt > RETRY_COUNT:
+                raise
+            time.sleep(RETRY_DELAY)
 
 
 def run(conn: sqlite3.Connection, storage, account: str, location, event_id: str, items, *, operation: str,

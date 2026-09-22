@@ -1,0 +1,49 @@
+{% extends "base.html" %}
+{% block title %}Scheduling Settings — {{ app_name }}{% endblock %}
+{% block body %}
+{% include "_topbar.html" %}
+<main class="page page-medium">
+  {% for category, message in get_flashed_messages(with_categories=true) %}
+  <p class="alert alert-{{ category }}" role="status">{{ message }}</p>
+  {% endfor %}
+  <h1>Settings</h1>
+  {% set section = 'scheduling' %}{% include "_settings_nav.html" %}
+  <h2 class="settings-section">Scheduling</h2>
+  <p class="lede">When Download &amp; Sync should run automatically. <strong>This saves the schedule; it does not yet start it</strong> —
+    scheduled runs arrive in a later phase, using this schedule through Windows Task Scheduler.</p>
+
+  {% if error %}
+  <p id="form-error" data-focus-alert class="alert alert-error" role="alert">{{ error }}</p>
+  {% endif %}
+
+  <form method="post" action="{{ url_for('settings.scheduling_post') }}" class="panel" novalidate data-busy-text="WORKING…">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+    <div class="field">
+      <label class="checkbox-label"><input type="checkbox" name="enabled" value="1" {% if enabled %}checked{% endif %}> Enable scheduled runs</label>
+      <p class="hint">Turning this on needs at least one day and a time below.</p>
+    </div>
+    <fieldset class="field">
+      <legend>Days</legend>
+      <div class="day-choices">
+        {% for d in day_choices %}
+        <label class="checkbox-label"><input type="checkbox" name="days" value="{{ d }}" {% if d in days %}checked{% endif %}> {{ d }}</label>
+        {% endfor %}
+      </div>
+    </fieldset>
+    <div class="field">
+      <label for="time">Time (24-hour)</label>
+      <input id="time" name="time" type="time" value="{{ time_typed }}" aria-describedby="{% if error %}form-error {% endif %}time-hint">
+      <p id="time-hint" class="hint">For example <span class="mono">02:30</span>. Leave it blank for no scheduled time.</p>
+    </div>
+    <dl class="kv">
+      <dt>Windows Task Scheduler / batch execution</dt>
+      <dd>The application does not run as a background service. A Windows Task Scheduler task (created by the installer) starts it at the
+        configured time; this page only stores the schedule the task will use.</dd>
+    </dl>
+    <div class="form-actions">
+      <button type="submit" class="btn btn-primary">SAVE SETTINGS</button>
+      <a class="btn btn-secondary" href="{{ url_for('views.dashboard') }}">Back to Dashboard</a>
+    </div>
+  </form>
+</main>
+{% endblock %}

@@ -43,6 +43,7 @@ def init_db(db_path: Path) -> None:
             )
         conn.executescript(DDL)
         _ensure_event_id_index(conn)
+        _ensure_events_cutoff_column(conn)
         if version == 0:
             conn.execute(f"PRAGMA user_version = {SCHEMA_VERSION}")
         conn.commit()
@@ -64,6 +65,15 @@ def _ensure_event_id_index(conn: sqlite3.Connection) -> None:
         conn.rollback()
         logging.getLogger("ledsync.db").warning(
             "events already holds Event IDs that differ only by case; the uniqueness index was not created.")
+
+
+def _ensure_events_cutoff_column(conn: sqlite3.Connection) -> None:
+    """A database created before Phase 10 has no `events.cutoff_timestamp` column (`CREATE TABLE IF NOT
+    EXISTS` never alters an existing table). Added at the end, matching where a fresh database's DDL
+    puts it, so `_verify`'s column-order check passes either way. Idempotent."""
+    columns = {r["name"] for r in conn.execute("PRAGMA table_info(events)")}
+    if "cutoff_timestamp" not in columns:
+        conn.execute("ALTER TABLE events ADD COLUMN cutoff_timestamp TEXT")
 
 
 def _verify(conn: sqlite3.Connection) -> None:

@@ -39,6 +39,27 @@
     </div>
   </section>
 
+  <section aria-labelledby="cutoff-heading" class="block">
+    <h2 id="cutoff-heading">Timestamp Cut-off</h2>
+    <p class="hint">Files changed in the cloud before this date and time are skipped &mdash; never downloaded, never counted as new or
+      updated. Only this event is affected. Leave it blank to compare everything (the default).</p>
+    {% if cutoff_error %}
+    <p id="cutoff-error" class="alert alert-error" role="alert">{{ cutoff_error }}</p>
+    {% endif %}
+    <form method="post" action="{{ url_for('devices.save_cutoff', event_id=event.event_id) }}" class="panel" novalidate data-busy-text="WORKING…">
+      <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+      <div class="field">
+        <label for="cutoff">Cut-off (UTC)</label>
+        <input id="cutoff" name="cutoff" type="datetime-local" value="{{ cutoff_typed }}"
+               aria-describedby="{% if cutoff_error %}cutoff-error {% endif %}cutoff-hint">
+        <p id="cutoff-hint" class="hint">Entered in UTC, not this computer's local time.</p>
+      </div>
+      <div class="form-actions">
+        <button type="submit" class="btn btn-secondary">SAVE CUT-OFF</button>
+      </div>
+    </form>
+  </section>
+
   <section aria-labelledby="map-heading" class="block">
     <h2 id="map-heading">Device Mapping</h2>
     <p class="hint">For each enabled LED, enter the device's IP address (optional) and the Windows shared folder its files go to,

@@ -343,3 +343,29 @@ def test_phase8_download_and_sync_of_the_whole_real_event_from_the_dashboard(cfg
     print(counts)
     assert all(counts.values())
     assert db_rows(cfg, "SELECT status FROM events")[0]["status"] == "Synced"
+
+
+def test_phase10_the_real_events_timestamp_cutoff_skips_everything_before_it_and_clearing_it_restores_normal_checking(cfg):
+    """A per-event cut-off set in the future skips the real event's changes; clearing it goes back to normal."""
+    from ledsync.services import changes
+    _, client = _signed_in_app(cfg)
+    tok = lambda: csrf_from(client, "/events/1000")           # noqa: E731
+    out = _text(client.post("/events/1000/cutoff", data={"csrf_token": tok(), "cutoff": "2030-01-01T00:00"},
+                            follow_redirects=True).get_data(as_text=True))
+    assert "Timestamp cut-off saved." in out
+    ctok = lambda: csrf_from(client, "/events/1000/changes")   # noqa: E731
+    checked = _text(client.post("/events/1000/changes/check", data={"csrf_token": ctok()},
+                                follow_redirects=True).get_data(as_text=True))
+    assert "Skipped (Before Cut" in checked or "Skipped" in checked
+    from ledsync.db import connect
+    conn = connect(cfg.db_path)
+    assert changes.load_cutoff_text(conn, "1000") == "2030-01-01T00:00:00Z"
+    conn.close()
+    print("Skipped chip present:", "Skipped" in checked)
+    out = _text(client.post("/events/1000/cutoff", data={"csrf_token": tok(), "cutoff": ""},
+                            follow_redirects=True).get_data(as_text=True))
+    assert "Timestamp cut-off saved." in out
+    checked_again = _text(client.post("/events/1000/changes/check", data={"csrf_token": ctok()},
+                                      follow_redirects=True).get_data(as_text=True))
+    assert "New, Not In Log" in checked_again                    # back to normal, matching TC-M03 in Phase 7's QA doc
+    print("Cut-off cleared; normal check restored:", "New, Not In Log" in checked_again)

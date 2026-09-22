@@ -1,0 +1,49 @@
+{% extends "base.html" %}
+{% block title %}Application Settings — {{ app_name }}{% endblock %}
+{% block body %}
+{% include "_topbar.html" %}
+<main class="page page-medium">
+  {% for category, message in get_flashed_messages(with_categories=true) %}
+  <p class="alert alert-{{ category }}" role="status">{{ message }}</p>
+  {% endfor %}
+  <h1>Settings</h1>
+  {% set section = 'application' %}{% include "_settings_nav.html" %}
+  <h2 class="settings-section">Application</h2>
+  <p class="lede">Where the application keeps its own data, and how long it keeps a record of what it did.</p>
+
+  {% if error %}
+  <p id="form-error" data-focus-alert class="alert alert-error" role="alert">{{ error }}</p>
+  {% endif %}
+
+  <div class="panel">
+    <dl class="kv">
+      <dt>Database location</dt>
+      <dd class="mono">{{ database_path }}</dd>
+      <dt>Application logging location</dt>
+      <dd class="mono">{{ app_log_path }}</dd>
+      <dt>Exception logging location</dt>
+      <dd>In the application database — see <a href="{{ url_for('logs.page', tab='exceptions') }}">Logs</a>.</dd>
+      <dt>Update / installer configuration</dt>
+      <dd>Configured by the Windows installer.</dd>
+    </dl>
+    <p class="hint">These are fixed for now. Moving a live database or log file safely needs more care than a text box allows —
+      that comes with the installer/upgrade work.</p>
+  </div>
+
+  <form method="post" action="{{ url_for('settings.application_post') }}" class="panel" novalidate data-busy-text="WORKING…">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+    <div class="field">
+      <label for="retention">Keep logs for (days)</label>
+      <input id="retention" name="retention" type="number" min="1" max="3650" step="1" value="{{ retention_typed }}"
+             inputmode="numeric" aria-describedby="{% if error %}form-error {% endif %}retention-hint">
+      <p id="retention-hint" class="hint">The Operational Log and Exception Log are pruned to this age at each application start.
+        Leave the box empty to keep every record forever (currently:
+        <span class="mono">{{ "forever" if saved.days is none else (saved.days ~ " day(s)") }}</span>).</p>
+    </div>
+    <div class="form-actions">
+      <button type="submit" class="btn btn-primary">SAVE SETTINGS</button>
+      <a class="btn btn-secondary" href="{{ url_for('views.dashboard') }}">Back to Dashboard</a>
+    </div>
+  </form>
+</main>
+{% endblock %}
