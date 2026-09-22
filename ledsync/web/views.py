@@ -48,9 +48,10 @@ def launch():
 @login_required
 def dashboard():
     event_rows = events.list_events(get_db(), tz=current_app.config.get("DISPLAY_TZ"))
+    jobs = current_app.extensions["ledsync.jobs"]
     return render_template(
         "dashboard.html", app_name=APP_NAME, version=__version__, username=session["user"],
-        events=event_rows,
+        events=event_rows, operations=jobs.running_snapshots(), summaries=jobs.take_all_summaries(),
     )
 
 

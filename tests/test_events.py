@@ -185,7 +185,7 @@ def test_dashboard_table_is_accessible(app, cfg, launched):
     _add(conn, "1", "E", "2026-09-08T10:00:00Z")
     conn.close()
     html = _dashboard(app, launched).get_data(as_text=True)
-    assert html.count('scope="col"') == 4 and "<caption" in html
+    assert html.count('scope="col"') == 5 and "<caption" in html and ">Actions</th>" in html
     assert "local time" in html
 
 

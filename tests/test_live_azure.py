@@ -276,3 +276,70 @@ def test_phase7_the_whole_real_event_is_downloaded_through_the_page(cfg):
     # a second run has nothing to do
     again = _text(client.post("/events/1000/changes/download", data={"csrf_token": tok()}, follow_redirects=True).get_data(as_text=True))
     assert "Downloaded 0 file(s)" in again
+
+
+def _map_scratch_devices(cfg, tmp_path_factory):
+    from ledsync.db import connect
+    from ledsync.services import mappings
+    from phase6_helpers import real_structure
+    conn = connect(cfg.db_path)
+    structure = real_structure()
+    devices = {}
+    values = {}
+    for table, led in structure.enabled_pairs:
+        folder = tmp_path_factory.mktemp(f"dev_t{table}_{led}")
+        devices[(table, led)] = folder
+        values[(table, led)] = ("", str(folder))
+    mappings.save_mappings(conn, "1000", structure, values, forbidden_roots=(cfg.data_dir,))
+    conn.close()
+    return devices
+
+
+def test_phase8_real_files_are_pushed_to_the_mapped_devices_and_match_azure(cfg, tmp_path_factory):
+    """A real selection is downloaded, then pushed to scratch 'device' folders, and each device copy is compared with what Azure lists."""
+    import dataclasses
+    import hashlib
+    from ledsync.db import connect
+    from ledsync.services import assets, changes, rpi, structure, sync
+    from ledsync.services.storage import EventLocation
+    _, client = _signed_in_app(cfg)
+    devices = _map_scratch_devices(cfg, tmp_path_factory)
+    conn = connect(cfg.db_path)
+    storage = AzureReadOnlyStorage(ACCOUNT, KEY)
+    report = changes.check_event(conn, storage, cs.load_cloud(conn), "1000")
+    wanted = [a for a in report.comparison.assessments if a.action == changes.DOWNLOAD and (
+        (a.table == 1 and a.led_type == "MainLED") or (a.table == 2 and a.file_name in ("sponsorsequence.csv", "App.png", "default.png")))]
+    assert wanted
+    small = dataclasses.replace(report.comparison, assessments=tuple(wanted))
+    location = EventLocation(report.container, report.folder)
+    res = assets.process(conn, storage, ACCOUNT, location, "1000", small, cfg.data_dir / "Events", cfg.data_dir)
+    assert res.failed == 0
+    items, unmapped = sync.plan(conn, "1000", cfg.data_dir / "Events" / "1000")
+    assert len(items) == len(wanted) and unmapped == []
+    result = sync.process(conn, "1000", items, cfg.data_dir)
+    assert (result.pushed, result.failed) == (len(wanted), 0), result.failures
+    for a in wanted:
+        stored = devices[(a.table, a.led_type)] / a.file_name
+        info = storage.find_blob(location, a.path)
+        assert stored.is_file() and stored.stat().st_size == info.size, a.path
+        if info.md5:
+            assert hashlib.md5(stored.read_bytes()).digest() == info.md5, a.path
+    for d in devices.values():
+        assert not [p for p in d.iterdir() if p.name.startswith(".")]                       # no temporary files left
+    assert sync.process(conn, "1000", sync.plan(conn, "1000", cfg.data_dir / "Events" / "1000")[0], cfg.data_dir).total == 0
+    assert KEY not in json.dumps(db_rows(cfg, "SELECT * FROM sync_history"))
+    conn.close()
+    print(f"pushed and verified {len(wanted)} real files on {len(devices)} devices")
+
+
+@pytest.mark.skipif(not os.environ.get("LEDSYNC_LIVE_FULL"), reason="full real download (about 630 MB): set LEDSYNC_LIVE_FULL=1")
+def test_phase8_download_and_sync_of_the_whole_real_event_from_the_dashboard(cfg, tmp_path_factory):
+    _, client = _signed_in_app(cfg)
+    devices = _map_scratch_devices(cfg, tmp_path_factory)
+    out = _text(client.post("/events/1000/sync", data={"csrf_token": csrf_from(client, "/")}, follow_redirects=True).get_data(as_text=True))
+    print(out[out.index("Downloaded"):][:300])
+    assert "failed 0." in out and "Synchronised" in out and "failed 0" in out.split("Synchronised", 1)[1][:120]
+    counts = {k: len([p for p in v.iterdir() if p.is_file()]) for k, v in devices.items()}
+    print(counts)
+    assert all(counts.values())
+    assert db_rows(cfg, "SELECT status FROM events")[0]["status"] == "Synced"

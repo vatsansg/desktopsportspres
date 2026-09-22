@@ -14,6 +14,7 @@ from .views_events import bp as events_bp
 from .views_settings import bp as settings_bp
 from .views_devices import bp as devices_bp
 from .views_changes import bp as changes_bp
+from .views_sync import bp as sync_bp
 from ..services import downloads, localchangelog
 from ..services import connectivity
 from ..services import storage as azure_storage
@@ -76,6 +77,7 @@ def create_app(config: Config) -> Flask:
     app.register_blueprint(settings_bp)
     app.register_blueprint(devices_bp)
     app.register_blueprint(changes_bp)
+    app.register_blueprint(sync_bp)
 
     @app.errorhandler(400)
     @app.errorhandler(403)

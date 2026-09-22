@@ -40,14 +40,29 @@ def _safe(value) -> str:
     return "'" + text if text[:1] in _FORMULA_STARTS else text
 
 
+def _sync_lookup(conn: sqlite3.Connection):
+    """(device folder per event/table/LED, latest sync status per event/destination) - to fill the Sync Status column."""
+    folders = {(r["event_id"].casefold(), r["table_number"], r["led_type"]): r["shared_folder"]
+               for r in conn.execute("SELECT event_id, table_number, led_type, shared_folder FROM led_mappings "
+                                     "WHERE shared_folder <> ''")}
+    latest = {}
+    for r in conn.execute("SELECT event_id, destination, status FROM sync_history ORDER BY sync_id"):
+        latest[(r["event_id"].casefold(), os.path.normcase(r["destination"] or ""))] = r["status"]
+    return folders, latest
+
+
 def _rows(conn: sqlite3.Connection, tz=None):
+    folders, latest = _sync_lookup(conn)
     for r in conn.execute("SELECT * FROM download_history ORDER BY download_id"):
-        led = structure.LED_LABELS.get(structure.canonical_led_type(r["led_type"]) or "", r["led_type"] or "")
+        canonical = structure.canonical_led_type(r["led_type"])
+        led = structure.LED_LABELS.get(canonical or "", r["led_type"] or "")
         table = f"Table {r['table_number']}" if r["table_number"] is not None else ""
+        folder = folders.get(((r["event_id"] or "").casefold(), r["table_number"], canonical)) if canonical else None
+        sync_status = latest.get(((r["event_id"] or "").casefold(),
+                                  os.path.normcase(os.path.join(folder, r["file_name"] or "")))) if folder else ""
         yield (r["download_id"], r["event_id"], table, led, r["file_name"], r["source_path"], r["local_path"],
                format_timestamp(r["download_timestamp"], tz) if r["download_timestamp"] else "",
-               r["source_timestamp"] or "", r["status"] or "",
-               "")           # Sync Status: filled from the synchronisation history when Phase 8 exists
+               r["source_timestamp"] or "", r["status"] or "", sync_status or "")
 
 
 def write(data_dir, conn: sqlite3.Connection | None = None, tz=None) -> bool:
