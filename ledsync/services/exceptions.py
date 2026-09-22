@@ -148,7 +148,7 @@ def query(conn: sqlite3.Connection, *, event_id: str = "", category: str = "", s
     clause = (" WHERE " + " AND ".join(where)) if where else ""
     total = conn.execute("SELECT COUNT(*) FROM exception_log" + clause, args).fetchone()[0]
     rows = conn.execute("SELECT * FROM exception_log" + clause + " ORDER BY exception_id DESC LIMIT ? OFFSET ?",
-                        [*args, max(1, min(int(limit), 100000)), max(0, int(offset))]).fetchall()
+                        [*args, max(1, min(int(limit), 100000)), max(0, min(int(offset), 10**15))]).fetchall()
     return rows, total
 
 

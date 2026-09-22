@@ -44,7 +44,7 @@ def _filters() -> dict:
         "text": args.get("text", "")[:100].strip(),
         "from": args.get("from", "")[:10].strip(),
         "to": args.get("to", "")[:10].strip(),
-        "page": max(1, args.get("page", 1, type=int) or 1),
+        "page": max(1, min(args.get("page", 1, type=int) or 1, 10**12)),   # a huge page number must never overflow a SQLite bind
     }
 
 

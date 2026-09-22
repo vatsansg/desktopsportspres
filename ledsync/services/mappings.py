@@ -166,7 +166,7 @@ def validate_shared_folder(text: str, label: str = "", forbidden_roots: tuple = 
                                "instead of a network path.")
         segments = parts[1:]
         if not segments or not segments[0]:
-            raise MappingError(f"{prefix}a network folder needs a share name, like \\\\{host}\\share.")
+            raise MappingError(f"{prefix}a network folder needs a share name, like '\\\\{host}\\share'.")
         head = "\\\\" + host
     elif re.match(r"^[A-Za-z]:\\", value):
         head = value[:2]

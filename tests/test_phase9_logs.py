@@ -366,3 +366,29 @@ def test_a_push_only_run_and_a_download_only_run_have_their_own_names(ev, cfg, t
 def test_the_later_phase_operation_names_are_reserved_in_the_filter(ev):
     html = ev.get("/logs").get_data(as_text=True)
     assert 'value="Scheduled Run"' in html and 'value="Application Update"' in html and 'value="Application Startup"' in html
+
+
+# --- independent-review regression tests -----------------------------------------------------------------------------------------
+
+def test_a_share_name_error_quotes_the_typed_host_so_the_rejection_log_never_carries_it(ev, cfg):
+    ev.post("/events/1000/mappings", data={"csrf_token": tok(ev, "/events/1000"), "action": "save",
+                                           "folder-1-Inner": "\\\\SECRET-FILESERVER-01"})
+    rows = db_rows(cfg, "SELECT message FROM exception_log")
+    assert len(rows) == 1 and "SECRET-FILESERVER-01" not in rows[0]["message"] and "'...'" in rows[0]["message"]
+
+
+def test_a_huge_page_number_never_crashes_the_logs_page(ev, cfg):
+    conn = connect(cfg.db_path)
+    oplog.record(conn, "Login", "Success", "x")
+    conn.close()
+    huge = "9" * 60
+    assert ev.get(f"/logs?page={huge}").status_code == 200
+    assert ev.get(f"/logs?tab=exceptions&page={huge}").status_code == 200
+
+
+def test_a_huge_offset_is_clamped_not_rejected(conn):
+    oplog.record(conn, "Login", "Success", "x")
+    rows, total = oplog.query(conn, offset=10 ** 30, limit=10)
+    assert rows == [] and total == 1
+    rows, total = exceptions.query(conn, offset=-5, limit=10)
+    assert rows == [] and total == 0

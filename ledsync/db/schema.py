@@ -103,6 +103,15 @@ CREATE TABLE IF NOT EXISTS exception_log (
     source            TEXT,     -- EXT (Section 21.1)
     destination       TEXT      -- EXT (Section 21.1)
 );
+
+-- The Logs page (Phase 9) filters and sorts both logs by these columns; without an index a large
+-- installation would scan the whole table on every page view.
+CREATE INDEX IF NOT EXISTS ix_operation_log_timestamp ON operation_log (timestamp);
+CREATE INDEX IF NOT EXISTS ix_operation_log_event_id ON operation_log (event_id);
+CREATE INDEX IF NOT EXISTS ix_operation_log_operation ON operation_log (operation);
+CREATE INDEX IF NOT EXISTS ix_exception_log_timestamp ON exception_log (timestamp);
+CREATE INDEX IF NOT EXISTS ix_exception_log_event_id ON exception_log (event_id);
+CREATE INDEX IF NOT EXISTS ix_exception_log_resolution_status ON exception_log (resolution_status);
 """
 
 # Expected columns per table, in order. Used by tests and by the startup
