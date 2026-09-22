@@ -368,6 +368,44 @@ def test_check_event_uses_the_saved_cutoff_and_counts_it_in_the_summary(ev, cfg)
     assert "Held (After Cut" in out or "held" in out.lower()
 
 
+def test_a_held_file_is_never_written_to_history_and_never_reaches_a_device_until_the_boundary_passes_it(ev, cfg, tmp_path_factory):
+    """Independent-review regression: the single most important property of the cut-off - a held file must never be
+    recorded as processed (nowhere a later check could mistake for 'already handled'), and must never reach an LED
+    device, until real time carries the boundary past it. Runs the full Download & Sync path, not just `compare()`."""
+    from datetime import timedelta, timezone
+    from phase6_helpers import csv_text
+    from test_phase8_sync import map_devices, put, sync_all
+
+    devices = map_devices(ev, cfg, tmp_path_factory)
+    put(ev, "Table 1/inner/now.png", b"now")
+    put(ev, "Table 1/inner/later.png", b"later")
+    future = (datetime.now(timezone.utc) + timedelta(days=2)).strftime("%Y-%m-%dT%H:%M:%S.000Z")
+    put(ev, "_ledassetschangelog.csv", csv_text([("Table 1/Inner/now.png", "2026-09-17T06:00:00.000Z", "New"),
+                                                 ("Table 1/Inner/later.png", future, "New")]))
+    conn = connect(cfg.db_path)
+    changes.save_cutoff_settings(conn, "1000", True, "12:00")
+    conn.close()
+
+    sync_all(ev)
+
+    history = db_rows(cfg, "SELECT file_name, status FROM download_history")
+    assert {r["file_name"] for r in history} == {"now.png"}                        # later.png has NO row at all, not a
+    assert history[0]["status"] == "Success"                                       # "Failed" or "Skipped" one either
+    assert (devices["t1i"] / "now.png").exists()
+    assert not (devices["t1i"] / "later.png").exists()                             # never pushed to the device
+    assert db_rows(cfg, "SELECT COUNT(*) AS n FROM sync_history WHERE file_name = 'later.png'")[0]["n"] == 0
+
+    # turn the cut-off off (the emergency override): the held file now arrives immediately, in the very next run
+    conn = connect(cfg.db_path)
+    changes.save_cutoff_settings(conn, "1000", False, "12:00")
+    conn.close()
+    sync_all(ev)
+
+    history = db_rows(cfg, "SELECT file_name, status FROM download_history WHERE file_name = 'later.png'")
+    assert len(history) == 1 and history[0]["status"] == "Success"                 # picked up cleanly, exactly once
+    assert (devices["t1i"] / "later.png").exists()
+
+
 # --- the cut-off form on the Device Mapping page ------------------------------------------------------------------------------
 
 def test_the_cutoff_form_saves_validates_and_needs_csrf_and_login(ev, cfg, client, launched):
