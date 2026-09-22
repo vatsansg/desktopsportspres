@@ -6,7 +6,7 @@ import sqlite3
 from flask import Blueprint, abort, current_app, flash, redirect, render_template, request, session, url_for
 
 from .. import APP_NAME, __version__
-from ..services import connectivity, eventstatus, events as event_service, mappings, registration as reg, structure
+from ..services import connectivity, eventstatus, exceptions, events as event_service, mappings, registration as reg, structure
 from ..services import settings as cloud_settings
 from .app_db import get_db
 from .security import login_required
@@ -120,6 +120,7 @@ def save_or_test(event_id):
     try:
         changed = mappings.save_mappings(db, row["event_id"], struct, _entries(struct), forbidden_roots=_forbidden(db, data_dir))
     except mappings.MappingError as err:
+        exceptions.record_rejection(db, "Mapping Saved", "Save Device Mapping", str(err), event_id=row["event_id"])
         return _render(row, struct, 400, posted=request.form, error=str(err))
 
     eventstatus.refresh(db, row["event_id"])

@@ -156,6 +156,12 @@ def _fail(conn, result: SyncResult, event_id, item: SyncItem, message: str, cate
                           led_type=item.led_type, file_name=item.file_name, destination=item.mapping.shared_folder)
 
 
+def _resolve(conn, event_id, item: SyncItem) -> None:
+    """A successful push or removal resolves the earlier failure of that file to that device."""
+    exceptions.resolve_matching(conn, event_id, OPERATION, table_number=item.table, led_type=item.led_type,
+                                file_name=item.file_name, destination=item.mapping.shared_folder)
+
+
 def _retry(action):
     """One more try after a short pause for a transient network problem or a copy that did not verify."""
     try:
@@ -223,10 +229,12 @@ def process(conn: sqlite3.Connection, event_id: str, items: list[SyncItem], data
                         item.source, folder, item.file_name, on_bytes=progress.add_bytes, cancelled=lambda: progress.cancelled))
                     _record(conn, event_id, item, "Success")
                     oplog.add(conn, OPERATION, "Success", f"{item.mapping.label}: sent {item.file_name}.", event_id)
+                    _resolve(conn, event_id, item)
                 else:
                     localfiles.delete_file(folder, item.file_name)
                     _record(conn, event_id, item, "Deleted")
                     oplog.add(conn, OPERATION, "Success", f"{item.mapping.label}: removed {item.file_name}.", event_id)
+                    _resolve(conn, event_id, item)
                 conn.commit()
                 if item.action == PUSH:
                     result.pushed += 1

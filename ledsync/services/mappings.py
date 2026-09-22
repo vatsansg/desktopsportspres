@@ -166,7 +166,7 @@ def validate_shared_folder(text: str, label: str = "", forbidden_roots: tuple = 
                                "instead of a network path.")
         segments = parts[1:]
         if not segments or not segments[0]:
-            raise MappingError(f"{prefix}a network folder needs a share name, like \\\\{host}\\share.")
+            raise MappingError(f"{prefix}a network folder needs a share name, like '\\\\{host}\\share'.")
         head = "\\\\" + host
     elif re.match(r"^[A-Za-z]:\\", value):
         head = value[:2]
@@ -356,6 +356,9 @@ def record_test(conn: sqlite3.Connection, mapping: Mapping, ok: bool, message: s
             return False
         oplog.add(conn, "Device Test", "Success" if ok else "Failed",
                   f"{mapping.label}: {status}. {message} {warning}".strip(), event_id=mapping.event_id)
+        if ok:
+            exceptions.resolve_matching(conn, mapping.event_id, "Test Connection", table_number=mapping.table_number,
+                                        led_type=mapping.led_type, destination=mapping.shared_folder)
         if not ok:
             conn.execute(
                 "INSERT INTO exception_log (event_id, timestamp, operation, category, message, resolution_status, "

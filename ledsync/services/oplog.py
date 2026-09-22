@@ -50,3 +50,52 @@ def record(
         conn.commit()
     except sqlite3.Error:
         log.exception("Could not write operation_log row (%s / %s)", operation, status)
+
+
+# --- reviewing (Phase 9) ---------------------------------------------------------------------------------------------------
+
+PAGE_SIZE = 100
+
+# The operation names written by the application (BRD Section 25). The two marked (later) are written by Phases 12 and 13.
+OPERATIONS = (
+    "Application Startup", "Login", "Logout", "Password Change", "Event Registered", "Event Re-registered", "Settings Changed",
+    "Mapping Saved", "Device Test", "Cloud Storage Test", "Check Changes", "Download & Sync", "Download Files", "Sync Files",
+    "Asset Download", "RPI Files", "Synchronise", "Exception Reviewed", "Log Export",
+    "Scheduled Run",          # (later) Phase 12
+    "Application Update",     # (later) Phase 13
+)
+STATUS_FILTERS = ("Success", "Failed", "Blocked", "Started", "Cancelled")
+
+
+def _like(text: str) -> str:
+    """A LIKE pattern that matches `text` literally (! is the escape character)."""
+    return "%" + text.replace("!", "!!").replace("%", "!%").replace("_", "!_") + "%"
+
+
+def query(conn: sqlite3.Connection, *, event_id: str = "", operation: str = "", status: str = "", start: str = "",
+          end: str = "", text: str = "", limit: int = PAGE_SIZE, offset: int = 0):
+    """(rows, total) newest first. `start` / `end` are UTC timestamps (start inclusive, end exclusive)."""
+    where, args = [], []
+    if event_id:
+        where.append("event_id = ? COLLATE NOCASE")
+        args.append(event_id)
+    if operation:
+        where.append("operation = ? COLLATE NOCASE")
+        args.append(operation)
+    if status in STATUS_FILTERS:
+        where.append("status = ?")
+        args.append(status)
+    if start:
+        where.append("timestamp >= ?")
+        args.append(start)
+    if end:
+        where.append("timestamp < ?")
+        args.append(end)
+    if text:
+        where.append("message LIKE ? ESCAPE '!'")
+        args.append(_like(text))
+    clause = (" WHERE " + " AND ".join(where)) if where else ""
+    total = conn.execute("SELECT COUNT(*) FROM operation_log" + clause, args).fetchone()[0]
+    rows = conn.execute("SELECT * FROM operation_log" + clause + " ORDER BY log_id DESC LIMIT ? OFFSET ?",
+                        [*args, max(1, min(int(limit), 100000)), max(0, min(int(offset), 10**15))]).fetchall()
+    return rows, total

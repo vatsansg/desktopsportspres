@@ -410,6 +410,11 @@ def check_event(conn: sqlite3.Connection, storage, settings, event_id: str) -> R
                  f"{comparison.count(DONE)} already processed, {comparison.count(NOT_APPLICABLE)} not applicable, "
                  f"{len(comparison.skipped)} unreadable row(s) in {comparison.source_name}; "
                  f"{comparison.count_label(LABEL_NEW_UNLOGGED)} file(s) found in Azure but not in the change log.", event_id)
+    exceptions.resolve_matching(conn, event_id, operation)                   # an earlier failed check of this event is over
+    try:
+        conn.commit()
+    except sqlite3.Error:
+        conn.rollback()
     now = datetime.now(timezone.utc)
     future = sum(1 for e in parsed.entries if e.timestamp > now + FUTURE_TOLERANCE)
     return Report(event_id, comparison, now, fetched.location.folder, fetched.location.container, registered, marker,

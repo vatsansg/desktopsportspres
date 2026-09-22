@@ -80,8 +80,8 @@ def parse_timestamp(value) -> datetime | None:
     return parsed
 
 
-def format_timestamp(value, tz: tzinfo | None = None) -> str:
-    """BRD 7.2 display: DD/MM/YY HH:MM, 24-hour, in `tz` (default: this machine's
+def format_timestamp(value, tz: tzinfo | None = None, seconds: bool = False) -> str:
+    """BRD 7.2 display: DD/MM/YY HH:MM, 24-hour (BRD 25 log display: DD/MM/YY HH:MM:SS with `seconds`), in `tz` (default: this machine's
     local time). Empty -> an em dash. Unparseable/out-of-range -> the raw text
     (never hidden). Never raises."""
     raw = _text(value)
@@ -91,7 +91,8 @@ def format_timestamp(value, tz: tzinfo | None = None) -> str:
     try:
         d = parsed.astimezone(tz)
         # Formatted by hand: strftime's %y is platform-dependent.
-        return f"{d.day:02d}/{d.month:02d}/{d.year % 100:02d} {d.hour:02d}:{d.minute:02d}"
+        stamp = f"{d.day:02d}/{d.month:02d}/{d.year % 100:02d} {d.hour:02d}:{d.minute:02d}"
+        return f"{stamp}:{d.second:02d}" if seconds else stamp
     except (ValueError, OverflowError, OSError):
         return raw or EMPTY
 

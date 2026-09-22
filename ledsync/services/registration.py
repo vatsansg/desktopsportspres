@@ -321,6 +321,7 @@ def register_event(conn: sqlite3.Connection, entered_event_id: str, config: Even
                   f"Event {config.event_id} registered ({len(config.tables)} table(s)); "
                   f"GUID {config.guid}; source: {source}.", event_id=config.event_id)
         conn.commit()
+        _resolve_registration_failures(conn, config.event_id)
     except sqlite3.IntegrityError:
         conn.rollback()
         raise RegistrationError(
@@ -375,6 +376,16 @@ def reregister_event(conn: sqlite3.Connection, entered_event_id: str, config: Ev
         log.exception("Could not save the re-registration of event %s", entered_event_id)
         raise RegistrationError(exceptions.CONFIGURATION,
                                 "The event could not be saved. Try again.", log=False) from None
+
+
+def _resolve_registration_failures(conn, event_id: str) -> None:
+    """A successful registration resolves the earlier refusals of that event (never raises)."""
+    try:
+        conn.execute("UPDATE exception_log SET resolution_status = 'Resolved' WHERE event_id = ? COLLATE NOCASE "
+                     "AND operation = 'Register Event' AND resolution_status IN ('Open', 'Acknowledged')", (event_id,))
+        conn.commit()
+    except sqlite3.Error:
+        conn.rollback()
 
 
 def log_rejection(conn: sqlite3.Connection, err: RegistrationError, operation: str,

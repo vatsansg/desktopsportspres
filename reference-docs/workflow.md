@@ -202,8 +202,26 @@ Status values: `Not started` / `In progress` / `Awaiting user go-ahead` / `Compl
   4. Carried: F-56 (devices are not watched), F-59 - F-62 (removal not re-verified, same-second re-download, old folder after a mapping change, one failure row per file), F-58 (no real SMB share tested), F-51/F-53.
 
 ## Phase 9 — Error Handling, Exception Log, Application Log
-- **Status:** Not started
-- **Completed on:** / **What was built:** / **QA Test Case doc:** / **Security Checklist:** / **Deviations:**
+- **Status:** Complete (owner's manual test passed - "All good" - and go-ahead given 22 September 2026, including an export/download defect the owner found and Claude fixed during testing; built, independently reviewed and validated the same day; merged to `main` and pushed - hashes in the table below)
+- **Includes:** Step 9.1 exception log with BRD Section 21 categories, resolution (Open / Acknowledged / Resolved, automatic on a later matching success), review by the administrator; Step 9.2 operational log with run-level Started/finished rows; a single **Logs** page (Operational Log / Exception Log tabs) reached from every signed-in page, filterable by event, operation or category, status, date range and text, with CSV export.
+- **Completed on:** 22 September 2026
+- **What was built:**
+  - `services/exceptions.py`: `resolve_matching` (a later success of the exact same event/operation/table/LED/file/source/destination resolves an earlier Open or Acknowledged row), `set_status` (administrator review, audited as *Exception Reviewed*), `query` (filtered, paged), `record_rejection` (a refused settings or mapping save becomes an Invalid configuration exception; anything typed in quotes is scrubbed before it is stored).
+  - `services/oplog.py`: `query`, and the full list of BRD Section 25 event names (`OPERATIONS`), including `Scheduled Run` and `Application Update`, reserved for Phases 12/13.
+  - `services/downloads.run_job` now brackets every run with a *Started* row and a finished row (*Success* / *Failed* / *Cancelled*, with the identified/downloaded/synchronised/errors counts), on its own database connection so the log write can never break the run.
+  - Success hooks added to `transfer.py`, `sync.py`, `mappings.py`, `registration.py`, `changes.py` and the cloud-test route, so a later success resolves the matching earlier failure.
+  - `web/views_logs.py` + `templates/logs.html`: the **Logs** page (`View Logs` in the top bar), two tabs, filters, paging, the administrator's status control per exception row, and **Export CSV** (formula-neutralised, BRD column names, up to 50,000 rows).
+  - Two small indexes added to `operation_log` and `exception_log` (timestamp, event_id, and resolution_status) - safe with the existing `CREATE TABLE/INDEX IF NOT EXISTS` schema (no migration runner).
+  - **Owner-found and fixed during testing:** the CSV export produced no file and no message. Cause: `pywebview` refuses every download by default (WebView2 cancels it silently). Fixed by turning it on (`webview.settings["ALLOW_DOWNLOADS"] = True`) before the window opens; WebView2's own native Save As dialog (defaulting to Downloads) now serves as the operator's confirmation. Covered by a regression test that runs the real startup path with a faked `webview` module.
+  - 1405 automated tests pass.
+- **QA Test Case doc:** `docs/QA_Desktop_Phase9_ExceptionAndApplicationLog.md` - 32 cases: all pass (automated groups covering 30 new pytest cases, 1 rendered-page group, 15 manual run by the owner: "All good").
+- **Security Checklist:** `docs/Security_Desktop_Phase9_ExceptionAndApplicationLog.md`
+- **Independent architect review:** **Approved with notes after fixes** - two findings reproduced and fixed: a refused UNC device folder with no share name embedded the typed hostname unquoted in the logs (now quoted, so the rejection scrub removes it); an extreme `page` value in the Logs URL caused an unhandled `OverflowError` (500) (page and offset now clamped). 3 regression tests; **not re-reviewed**.
+- **`ralph-loop` / `wtt-brand`:** applied to the Logs page (one orange action, bordered filters/selects, accessible review controls).
+- **Deviations / owner decisions:**
+  1. **One Logs page, two tabs; resolution set by the administrator AND automatically on a later success; keep everything (no pruning); CSV export of the filtered view** (owner, 22 Sep 2026).
+  2. Times shown in local time (stored UTC); a refused settings/mapping save is now logged (Invalid configuration) with typed values scrubbed; run-level Started/finished rows added to every Download & Sync, Download Files and Sync Files run - my defaults; tell me if any is wrong.
+  3. Carried: F-63 (Scheduled Run / Application Update have no source yet - Phases 12/13), F-64 (no free-text resolution note), F-65 (retention setting expected with Phase 10), F-66 (large-log performance not measured directly; indexes added as a precaution).
 
 ## Phase 10 — Application Settings and Dashboard Polish
 - **Status:** Not started

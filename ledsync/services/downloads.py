@@ -16,7 +16,7 @@ import threading
 from dataclasses import dataclass, field
 
 from ..db import connect
-from . import assets, changes, eventstatus, localchangelog, localfiles, rpi, sync
+from . import assets, changes, eventstatus, localchangelog, localfiles, oplog, rpi, sync
 from . import settings as cloud_settings
 from .progress import Progress
 from .storage import EventLocation
@@ -158,9 +158,39 @@ def _describe_sync(result: sync.SyncResult) -> list[dict]:
     return lines
 
 
+def _run_record(config, operation: str, status: str, message: str, event_id: str) -> None:
+    """One run-level row in the operational log (BRD 25), on its own short connection. Never raises."""
+    try:
+        conn = connect(config.db_path)
+        try:
+            oplog.record(conn, operation, status, message, event_id)
+        finally:
+            conn.close()
+    except Exception:                                            # noqa: BLE001 - the log must never stop a run
+        log.exception("Could not write the run-level log row")
+
+
 def run_job(config, storage_factory, settings, event_id: str, progress: Progress, tz=None, on_report=None, *,
             download: bool = True, push: bool = True, checker=None) -> list[dict]:
-    """The whole job (blocking). Returns the summary lines and sets `progress.final_state`; the registry ends the job."""
+    """The whole job (blocking), bracketed by a Started row and a finished row in the operational log (the finished row
+    carries the counts). Returns the summary lines and sets `progress.final_state`; the registry ends the job."""
+    label = "Download & Sync" if download and push else ("Download Files" if download else "Sync Files")
+    _run_record(config, label, "Started", f"{label} started.", event_id)
+    try:
+        lines = _run_job(config, storage_factory, settings, event_id, progress, tz, on_report, download=download, push=push,
+                         checker=checker)
+    except BaseException:
+        _run_record(config, label, "Failed", "The run stopped because of an unexpected problem.", event_id)
+        raise
+    state = progress.final_state
+    status = "Cancelled" if state == "cancelled" else ("Failed" if state == "error" or progress.errors else "Success")
+    _run_record(config, label, status, f"Identified {progress.identified}, downloaded {progress.downloaded}, "
+                                       f"synchronised {progress.synchronised}, errors {progress.errors}.", event_id)
+    return lines
+
+
+def _run_job(config, storage_factory, settings, event_id: str, progress: Progress, tz=None, on_report=None, *,
+             download: bool = True, push: bool = True, checker=None) -> list[dict]:
     conn = connect(config.db_path)
     try:
         progress.phase = "Checking"
