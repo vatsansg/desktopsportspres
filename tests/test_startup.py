@@ -166,6 +166,27 @@ def test_startup_seeds_the_default_admin_and_logs_the_start(data_dir):
     assert [tuple(r) for r in rows] == [("Application Startup", "Success")] * 2
 
 
+def test_downloads_are_allowed_before_the_window_opens(data_dir, monkeypatch):
+    """pywebview cancels every download by default (WebView2 silently refuses it - no file, no error).
+    The Logs page's CSV export needs it, so _run must turn it on before the window is created."""
+    import argparse
+    import types
+
+    order = []
+    fake_webview = types.SimpleNamespace(
+        settings={"ALLOW_DOWNLOADS": False},
+        create_window=lambda *a, **k: (order.append("create_window"), object())[1],
+        start=lambda *a, **k: order.append("start"),
+    )
+    monkeypatch.setitem(sys.modules, "webview", fake_webview)
+    monkeypatch.setattr(platform_checks, "webview2_version", lambda: "1.0")
+
+    main_mod._run(argparse.Namespace(auto_close=None))
+
+    assert fake_webview.settings["ALLOW_DOWNLOADS"] is True
+    assert order == ["create_window", "start"]                 # allowed before the window is shown, not after
+
+
 def test_werkzeug_access_log_is_suppressed_so_the_launch_token_never_reaches_a_log(data_dir):
     import logging
 

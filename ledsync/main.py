@@ -63,6 +63,12 @@ def _run(args: argparse.Namespace) -> None:
     # run) never load pythonnet/WinForms.
     import webview
 
+    # pywebview refuses every download by default (WebView2 cancels it before it starts, with no
+    # error and no file). The Logs page's CSV export needs it: allowing it makes WebView2 show its
+    # native Save As dialog (defaulting to Downloads), which is also the operator's confirmation
+    # that the export happened and where it went.
+    webview.settings["ALLOW_DOWNLOADS"] = True
+
     running = start_server(create_app(cfg))
     log.info("UI server listening on %s", running.url)  # never log launch_url: it carries the one-time token
     try:

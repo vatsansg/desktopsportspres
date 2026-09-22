@@ -47,7 +47,7 @@ foreach ($d in "t1i","t1o","t1m","t2i") { New-Item -ItemType Directory -Force "$
 | 10 | **Review.** On any Open row choose **Acknowledged** in its list and press **Save**; then choose **Resolved** on another | The page reloads on the Exception Log with the same filters and "Exception N marked Acknowledged." The badge changes colour. In the Operational Log there is an *Exception Reviewed* row for each change | TC-M10 |
 | 11 | **Filter by resolution:** Exception Log → **Resolution = Open**, then **Error Category = Invalid configuration** | Only matching rows | TC-M11 |
 | 12 | **Failed sync, then success.** Close the app and repeat the setup lines for a fresh data folder, register `1000`, map the four folders, then rename `%TEMP%\ledsync-devices\t1o` to `t1o-gone` **before** clicking **Download & Sync**. When it finishes open the Exception Log, then rename the folder back and click **Download & Sync** again | After the first run: Open *Synchronise* exceptions for Table 1 Outer, and the run row in the Operational Log says *Failed* with "errors 25". After the second run the run row says *Success* and those exceptions read **Resolved** by themselves | TC-M12 |
-| 13 | **Export.** On the Exception Log with a filter set press **Export CSV**; then the same on the Operational Log | Files `ledsync_exception_log.csv` and `ledsync_operational_log.csv` download. Open in Excel: exception columns are Date/Time, Event ID, Table, LED Type, File Name, Operation, Error Category, Error Description, Source, Destination, Resolution/Status; only the filtered rows are in; times are `DD/MM/YY HH:MM:SS`. The Operational Log now has a *Log Export* row | TC-M13 |
+| 13 | **Export.** On the Exception Log with a filter set press **Export CSV**; then the same on the Operational Log | A native **Save As** dialog opens, starting in your Downloads folder, named `ledsync_exception_log.csv` (then `ledsync_operational_log.csv`). Save it, then open in Excel: exception columns are Date/Time, Event ID, Table, LED Type, File Name, Operation, Error Category, Error Description, Source, Destination, Resolution/Status; only the filtered rows are in; times are `DD/MM/YY HH:MM:SS`. The Operational Log now has a *Log Export* row | TC-M13 |
 | 14 | Keyboard only: Tab through the Logs page (tabs, filters, table, review list and Save) | Visible focus ring everywhere; each review list and Save button announces which exception it changes | TC-M14 |
 | 15 | Close the app and start it again (same `LEDSYNC_DATA_DIR`), sign in, open the Logs | Everything from before is still there (nothing is deleted); a second *Application Startup* row is added | TC-M15 |
 
@@ -57,9 +57,9 @@ Clean up: close the app, then `Remove-Item -Recurse -Force "$env:TEMP\ledsync-te
 
 | Total cases | Passed | Failed | Blocked | Not yet run |
 |---|---|---|---|---|
-| 32 | 17 (automated groups covering 29 new pytest cases plus all earlier tests, and 1 rendered-page group — all run by Claude) | 0 | 0 | 15 (manual TC-M01 – TC-M15, for the owner) |
+| 32 | 18 (automated groups covering 30 new pytest cases plus all earlier tests, and 1 rendered-page group — all run by Claude) | 0 | 0 | 15 (manual TC-M01 – TC-M15, for the owner) |
 
-`.\.venv\Scripts\python -m pytest -q` → **1404 passed, 13 skipped** (the skipped are the live-Azure tests, which need `--live`).
+`.\.venv\Scripts\python -m pytest -q` → **1405 passed, 13 skipped** (the skipped are the live-Azure tests, which need `--live`).
 
 ## Test cases — automated
 
@@ -78,6 +78,7 @@ Clean up: close the app, then `Remove-Item -Recurse -Force "$env:TEMP\ledsync-te
 | TC-A11 | **Run rows:** a failed run is recorded *Failed* with its counts; a push-only and a download-only run have their own names; the Scheduled Run and Application Update names are reserved in the filter | Pass |
 | TC-A12 | **Independent-review regression tests (3):** a typed network host in a refused mapping is quoted before logging (never stored raw); an astronomically large page number never crashes the Logs page; a huge or negative offset is clamped rather than raising | Pass |
 | TC-A13 | Earlier phases unchanged (top bar gains one link; all earlier tests pass) | Pass |
+| TC-A14 | **Owner-found defect:** downloads are allowed before the window opens, so the CSV export actually reaches disk | Pass |
 
 ## Rendered-page checks
 
@@ -89,6 +90,7 @@ Clean up: close the app, then `Remove-Item -Recurse -Force "$env:TEMP\ledsync-te
 
 | ID | Description | Severity | Status |
 |---|---|---|---|
+| F-67 | **Owner-found (22/09/26): the CSV export produced no file.** `pywebview` refuses every download by default (WebView2 cancels it silently, with no error and no visible message) unless the host application explicitly allows it. | Medium | **Closed** — `webview.settings["ALLOW_DOWNLOADS"] = True` is now set before the window opens; WebView2 then shows its own native **Save As** dialog (defaulting to the Downloads folder), which also serves as the operator's confirmation that the export happened and where it went. A regression test starts the real startup path with a faked `webview` module and asserts the setting is on before the window is created. |
 | F-66 | Query performance on a large log (100,000+ rows) was not measured directly; three indexes were added (`timestamp`, `event_id` on each log, plus `resolution_status` on the exception log) as a precaution, since the schema has no migration runner and `CREATE INDEX IF NOT EXISTS` is safe to add to the same idempotent script. | Low | Accepted |
 | F-63 | **Scheduled executions** and **application updates** (BRD Section 25) cannot be logged yet — the features arrive in Phases 12 and 13; their names are reserved. | Info | Carried to Phases 12 / 13 |
 | F-64 | The exception status has no free-text note (a note needs a schema change; no migration runner yet). | Low | Accepted |
@@ -99,5 +101,6 @@ Clean up: close the app, then `Remove-Item -Recurse -Force "$env:TEMP\ledsync-te
 
 | Role | Name | Date | Outcome |
 |---|---|---|---|
+| Owner-reported defect (22/09/26) | Vatsan | 22/09/26 | "not seeing the export file … need a pop up message to confirm the file exported" — root cause found (pywebview downloads disabled by default) and fixed same day; see F-67 |
 | Independent Solution Architect review | Independent review agent (fresh context) | 22/09/26 | **Approved with notes after fixes** — two "fix now" findings, both reproduced and fixed: a refused UNC device folder with no share name embedded the typed host **unquoted** in the exception and operational logs (now quoted like every sibling validation message, so the rejection scrub removes it); an astronomically large `page` value in the URL caused an unhandled `OverflowError` (500) on the Logs page (page and offset are now clamped). Also added on the reviewer's note: indexes on the log tables' `timestamp`, `event_id` and (exception log) `resolution_status` columns, ahead of real volume. 3 regression tests; **not re-reviewed**. Verified sound: auto-resolution scoping (never cross-event or cross-file), transaction safety, run-row accounting in every path, LIKE escaping, CSRF and the review redirect's whitelist, CSV formula neutralisation, date-filter exception handling. |
 | User (Vatsan) go-ahead | Vatsan | pending | pending |
