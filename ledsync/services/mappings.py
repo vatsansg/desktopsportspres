@@ -356,6 +356,9 @@ def record_test(conn: sqlite3.Connection, mapping: Mapping, ok: bool, message: s
             return False
         oplog.add(conn, "Device Test", "Success" if ok else "Failed",
                   f"{mapping.label}: {status}. {message} {warning}".strip(), event_id=mapping.event_id)
+        if ok:
+            exceptions.resolve_matching(conn, mapping.event_id, "Test Connection", table_number=mapping.table_number,
+                                        led_type=mapping.led_type, destination=mapping.shared_folder)
         if not ok:
             conn.execute(
                 "INSERT INTO exception_log (event_id, timestamp, operation, category, message, resolution_status, "

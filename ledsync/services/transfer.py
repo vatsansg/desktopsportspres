@@ -115,6 +115,7 @@ def run(conn: sqlite3.Connection, storage, account: str, location, event_id: str
                 info, target = _retry(attempt)
                 history(conn, event_id, item, table, led, location.blob_url(account, info.path), str(target), "Success")
                 oplog.add(conn, operation, "Success", f"Downloaded {item.file_name}.", event_id)
+                exceptions.resolve_matching(conn, event_id, operation, table_number=table, led_type=led, file_name=item.file_name)
                 result.downloaded += 1
                 progress.tally_downloaded()
             else:
@@ -124,6 +125,7 @@ def run(conn: sqlite3.Connection, storage, account: str, location, event_id: str
                 history(conn, event_id, item, table, led, location.blob_url(account, item.path),
                         str(folder / item.file_name) if folder is not None else "", "Deleted")
                 oplog.add(conn, operation, "Success", f"Removed {item.file_name}.", event_id)
+                exceptions.resolve_matching(conn, event_id, operation, table_number=table, led_type=led, file_name=item.file_name)
                 result.removed += 1
             conn.commit()
             ok = True

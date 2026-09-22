@@ -1,0 +1,137 @@
+{% extends "base.html" %}
+{% block title %}Logs — {{ app_name }}{% endblock %}
+{% block body %}
+{% include "_topbar.html" %}
+<main class="page">
+  {% for category, message in get_flashed_messages(with_categories=true) %}
+  <p class="alert alert-{{ category }}" role="{{ 'alert' if category == 'error' else 'status' }}">{{ message }}</p>
+  {% endfor %}
+  <p class="crumb"><a href="{{ url_for('views.dashboard') }}">&larr; Dashboard</a></p>
+  <h1>Logs</h1>
+  <p class="lede">Everything the application did, and every error it met. Times are shown in this computer's local time.</p>
+
+  <nav class="subnav" aria-label="Log type">
+    <a href="{{ tab_url('operations') }}"{% if f.tab == 'operations' %} class="active" aria-current="page"{% endif %}>Operational Log</a>
+    <a href="{{ tab_url('exceptions') }}"{% if f.tab == 'exceptions' %} class="active" aria-current="page"{% endif %}>Exception Log</a>
+  </nav>
+
+  <form method="get" action="{{ url_for('logs.page') }}" class="panel filters" novalidate>
+    <input type="hidden" name="tab" value="{{ f.tab }}">
+    <div class="field">
+      <label for="f-event">Event</label>
+      <select id="f-event" name="event">
+        <option value="">All events</option>
+        {% for e in event_ids %}<option value="{{ e }}"{% if e|lower == f.event|lower %} selected{% endif %}>{{ e }}</option>{% endfor %}
+      </select>
+    </div>
+    <div class="field">
+      <label for="f-kind">{{ 'Error Category' if f.tab == 'exceptions' else 'Operation' }}</label>
+      <select id="f-kind" name="kind">
+        <option value="">All</option>
+        {% for k in kinds %}<option value="{{ k }}"{% if k == f.kind %} selected{% endif %}>{{ k }}</option>{% endfor %}
+      </select>
+    </div>
+    <div class="field">
+      <label for="f-status">{{ 'Resolution' if f.tab == 'exceptions' else 'Status' }}</label>
+      <select id="f-status" name="status">
+        <option value="">All</option>
+        {% for s in statuses %}<option value="{{ s }}"{% if s == f.status %} selected{% endif %}>{{ s }}</option>{% endfor %}
+      </select>
+    </div>
+    <div class="field">
+      <label for="f-from">From</label>
+      <input id="f-from" name="from" type="date" value="{{ f['from'] }}">
+    </div>
+    <div class="field">
+      <label for="f-to">To</label>
+      <input id="f-to" name="to" type="date" value="{{ f['to'] }}">
+    </div>
+    <div class="field">
+      <label for="f-text">Contains</label>
+      <input id="f-text" name="text" type="text" value="{{ f.text }}" maxlength="100" autocomplete="off">
+    </div>
+    <div class="form-actions">
+      <button type="submit" class="btn btn-primary">APPLY FILTERS</button>
+      <a class="btn btn-secondary" href="{{ url_for('logs.page', tab=f.tab) }}">Clear</a>
+      <a class="btn btn-secondary" href="{{ export_url }}">Export CSV</a>
+    </div>
+  </form>
+
+  <p class="count log-count" role="status">{{ total }} record{{ '' if total == 1 else 's' }}{% if pages > 1 %} &middot; page {{ f.page }} of {{ pages }}{% endif %}</p>
+
+  {% if rows %}
+  <div class="table-wrap" tabindex="0" role="region" aria-label="{{ 'Exception log' if f.tab == 'exceptions' else 'Operational log' }} table">
+    {% if f.tab == 'exceptions' %}
+    <table class="data-table">
+      <caption class="sr-only">Exception log, newest first</caption>
+      <thead>
+        <tr>
+          <th scope="col">Date/Time</th><th scope="col">Event</th><th scope="col">Table</th><th scope="col">LED Type</th>
+          <th scope="col">File Name</th><th scope="col">Operation</th><th scope="col">Category</th><th scope="col">Description</th>
+          <th scope="col">Source</th><th scope="col">Destination</th><th scope="col">Resolution</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for r in rows %}
+        <tr>
+          <td class="nowrap">{{ r.when }}</td>
+          <td class="nowrap">{{ r.event_id or '—' }}</td>
+          <td class="nowrap">{{ r.table_number if r.table_number is not none else '—' }}</td>
+          <td class="nowrap">{{ r.led_type or '—' }}</td>
+          <td>{{ r.file_name or '—' }}</td>
+          <td class="nowrap">{{ r.operation or "—" }}</td>
+          <td>{{ r.category or '—' }}</td>
+          <td class="log-wide">{{ r.message or "—" }}</td>
+          <td>{{ r.source or '—' }}</td>
+          <td class="log-path">{{ r.destination or "—" }}</td>
+          <td class="nowrap">
+            <form method="post" action="{{ url_for('logs.review', exception_id=r.exception_id) }}" class="inline-form" novalidate>
+              <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+              {% for key, value in keep.items() if key not in ('tab', 'page') %}<input type="hidden" name="{{ key }}" value="{{ value }}">{% endfor %}
+              <input type="hidden" name="page" value="{{ f.page }}">
+              <span class="badge badge-{{ 'synced' if r.resolution_status == 'Resolved' else ('ready' if r.resolution_status == 'Acknowledged' else 'attention') }}">{{ r.resolution_status }}</span>
+              <select name="new_status" class="cell-input" aria-label="Change status of exception {{ r.exception_id }}">
+                {% for s in review_statuses %}<option value="{{ s }}"{% if s == r.resolution_status %} selected{% endif %}>{{ s }}</option>{% endfor %}
+              </select>
+              <button type="submit" class="btn btn-secondary btn-sm" aria-label="Save status of exception {{ r.exception_id }}">Save</button>
+            </form>
+          </td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+    {% else %}
+    <table class="data-table">
+      <caption class="sr-only">Operational log, newest first</caption>
+      <thead>
+        <tr><th scope="col">Date/Time</th><th scope="col">Event</th><th scope="col">Operation</th><th scope="col">Status</th><th scope="col">Message</th></tr>
+      </thead>
+      <tbody>
+        {% for r in rows %}
+        <tr>
+          <td class="nowrap">{{ r.when }}</td>
+          <td class="nowrap">{{ r.event_id or '—' }}</td>
+          <td class="nowrap">{{ r.operation or "—" }}</td>
+          <td class="nowrap"><span class="badge badge-{{ 'synced' if r.status == 'Success' else ('attention' if r.status in ('Failed', 'Blocked') else 'other') }}">{{ r.status or '—' }}</span></td>
+          <td class="log-wide">{{ r.message or "—" }}</td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+    {% endif %}
+  </div>
+  {% else %}
+  <div class="panel empty-state">
+    <h3>Nothing To Show</h3>
+    <p>No records match these filters.</p>
+  </div>
+  {% endif %}
+
+  {% if pages > 1 %}
+  <nav class="subnav pager" aria-label="Pages">
+    {% if f.page > 1 %}<a href="{{ page_url(f.page - 1) }}">Newer</a>{% endif %}
+    {% if f.page < pages %}<a href="{{ page_url(f.page + 1) }}">Older</a>{% endif %}
+  </nav>
+  {% endif %}
+</main>
+{% endblock %}

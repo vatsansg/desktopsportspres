@@ -59,6 +59,7 @@ def folders_post():
     try:
         changed = cs.save_folders(db, rpi_typed, asset_typed, data_dir)
     except cs.SettingsError as err:
+        exceptions.record_rejection(db, "Settings Changed", "Save Folder Settings", str(err))
         return _folders_page(db, data_dir, rpi_typed, asset_typed, str(err)), 400
     flash("Local folder settings saved." if changed else "Nothing changed \u2014 the settings were already saved.",
           "success" if changed else "info")
@@ -81,6 +82,7 @@ def cloud_post():
     try:
         changed = cs.save_cloud(db, account, container, new_key)
     except cs.SettingsError as err:
+        exceptions.record_rejection(db, "Settings Changed", "Save Cloud Settings", str(err))
         return render_template("settings_cloud.html", **_view_model(
             saved, account=account.strip()[:60], container=container.strip()[:70], error=str(err))), 400
     flash("Cloud storage settings saved." if changed else "Nothing changed \u2014 the settings were already saved.",
@@ -121,5 +123,7 @@ def _test_connection(db, saved, account, container, new_key):
     message += " Nothing has been saved" + (
         " \u2014 type the key again and press Save to keep these settings." if new_key.strip() else ".")
     oplog.record(db, "Cloud Storage Test", "Success", f"Connected to {report.account} ({len(report.containers)} container(s)).")
+    exceptions.resolve_matching(db, None, "Test Connection", source=f"Azure Storage: {candidate.account}")
+    db.commit()
     return render_template("settings_cloud.html", **_view_model(
         saved, account=candidate.account, container=candidate.container, notice=message)), 200
