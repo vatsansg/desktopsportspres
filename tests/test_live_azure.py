@@ -345,27 +345,40 @@ def test_phase8_download_and_sync_of_the_whole_real_event_from_the_dashboard(cfg
     assert db_rows(cfg, "SELECT status FROM events")[0]["status"] == "Synced"
 
 
-def test_phase10_the_real_events_timestamp_cutoff_skips_everything_before_it_and_clearing_it_restores_normal_checking(cfg):
-    """A per-event cut-off set in the future skips the real event's changes; clearing it goes back to normal."""
+def test_phase10_the_real_events_recurring_timestamp_cutoff_saves_and_enables_disables_correctly(cfg):
+    """Proves save/enable/disable against the real event and the real page. Whether any real file ends up held
+    depends on how recently the web team last touched it relative to "now" (the web application is a live system -
+    a real cut-off enabled with a time close to "now" can legitimately hold a very recent real change, which is the
+    feature working correctly, not a bug). The controlled hold/release mechanics are proven with a fixed, fake clock
+    in tests/test_phase10_settings.py; this only proves the real save/enable/disable round-trip is harmless."""
     from ledsync.services import changes
+    from ledsync.db import connect
     _, client = _signed_in_app(cfg)
     tok = lambda: csrf_from(client, "/events/1000")           # noqa: E731
-    out = _text(client.post("/events/1000/cutoff", data={"csrf_token": tok(), "cutoff": "2030-01-01T00:00"},
-                            follow_redirects=True).get_data(as_text=True))
-    assert "Timestamp cut-off saved." in out
     ctok = lambda: csrf_from(client, "/events/1000/changes")   # noqa: E731
-    checked = _text(client.post("/events/1000/changes/check", data={"csrf_token": ctok()},
-                                follow_redirects=True).get_data(as_text=True))
-    assert "Skipped (Before Cut" in checked or "Skipped" in checked
-    from ledsync.db import connect
-    conn = connect(cfg.db_path)
-    assert changes.load_cutoff_text(conn, "1000") == "2030-01-01T00:00:00Z"
-    conn.close()
-    print("Skipped chip present:", "Skipped" in checked)
-    out = _text(client.post("/events/1000/cutoff", data={"csrf_token": tok(), "cutoff": ""},
+
+    # A cut-off time close to midday UTC, chosen to be at least 3 hours from "now" in either direction, so this
+    # test's own result does not depend on exactly when it happens to run relative to the real event's own edits.
+    from datetime import datetime, timedelta, timezone
+    now = datetime.now(timezone.utc)
+    picked = (now - timedelta(hours=6)).strftime("%H:%M")
+
+    out = _text(client.post("/events/1000/cutoff", data={"csrf_token": tok(), "cutoff_enabled": "1", "cutoff_time": picked},
                             follow_redirects=True).get_data(as_text=True))
     assert "Timestamp cut-off saved." in out
-    checked_again = _text(client.post("/events/1000/changes/check", data={"csrf_token": ctok()},
-                                      follow_redirects=True).get_data(as_text=True))
-    assert "New, Not In Log" in checked_again                    # back to normal, matching TC-M03 in Phase 7's QA doc
-    print("Cut-off cleared; normal check restored:", "New, Not In Log" in checked_again)
+    conn = connect(cfg.db_path)
+    assert changes.load_cutoff_settings(conn, "1000") == changes.CutoffSettings(True, picked)
+    conn.close()
+    enabled = client.post("/events/1000/changes/check", data={"csrf_token": ctok()}, follow_redirects=True)
+    assert enabled.status_code == 200                          # the check completes normally with the cut-off on
+
+    out = _text(client.post("/events/1000/cutoff", data={"csrf_token": tok(), "cutoff_time": picked},
+                            follow_redirects=True).get_data(as_text=True))     # unchecked = disabled
+    assert "Timestamp cut-off saved." in out
+    conn = connect(cfg.db_path)
+    assert changes.load_cutoff_settings(conn, "1000") == changes.CutoffSettings(False, picked)
+    conn.close()
+    disabled = _text(client.post("/events/1000/changes/check", data={"csrf_token": ctok()},
+                                 follow_redirects=True).get_data(as_text=True))
+    assert "New, Not In Log" in disabled and "Held (After Cut" not in disabled   # off: never holds anything
+    print("Cut-off saved, enabled and disabled against the real event and page without error.")

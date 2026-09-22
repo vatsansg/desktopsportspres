@@ -25,11 +25,17 @@ Rules (owner decisions 21/09/26 and the web BRD v2.4 note):
     copies) are found by also listing each enabled Table / LED folder in Azure, and are offered as
     "New (not in log)" when they are not stored locally yet (owner decision 21/09/26). The change log always wins
     for any path it mentions.
-  * The "Last Updated Timestamp Cut-off" (BRD Section 14/18) is a PER-EVENT setting (owner decision,
-    22/09/26: one event's cut-off must never affect another event), set on the event's Device Mapping
-    page. Blank (the default) compares everything, as before. When set, any change-log entry (or
-    Azure-only file) timestamped before the cut-off is SKIPPED - never downloaded, never counted as
-    New/Updated/Removed - shown separately so the operator can see what was left out and why.
+  * The "Last Updated Timestamp Cut-off" (BRD Section 14/18) is a PER-EVENT, RECURRING DAILY quiet
+    period (owner decision, 22/09/26, refined same day): a time of day (UTC), not a one-time date, so
+    that nothing changed close to showtime reaches the LED devices unreviewed. Off by default (the
+    "Enable cut-off" switch), and off compares everything, exactly as before this existed.
+    When enabled, every check computes the CUT-OFF BOUNDARY: the most recent past occurrence of that
+    time of day (today's, if it has already happened; otherwise yesterday's). A change-log entry (or
+    Azure-only file) timestamped AFTER the boundary is SKIPPED - New, Updated AND Deleted alike, so a
+    late removal is held back exactly like a late upload - shown separately so the operator can see
+    what was held and why. Nothing is lost: the same file is reconsidered, and downloaded or removed
+    normally, once real time carries the boundary past its timestamp (the next day's occurrence).
+    Turning the switch off is the emergency override: every change downloads immediately, cut-off or not.
 
 Comparing only reads and decides: it changes no file and no database row.
 """
@@ -49,7 +55,7 @@ from . import structure
 from .changelog import (
     ChangeLogError, CloudEntry, ParsedChangeLog, SkippedRow, _path_problem, blocked_name_problem, fetch_change_log,
 )
-from .events import MAX_YEAR, MIN_YEAR, parse_timestamp
+from .events import parse_timestamp
 from .storage import StorageError
 
 log = logging.getLogger(__name__)
@@ -58,7 +64,7 @@ DOWNLOAD = "Download"
 DELETE = "Delete local copy"
 DONE = "Already processed"
 NOT_APPLICABLE = "Not applicable"
-SKIPPED_CUTOFF = "Skipped (before cut-off)"
+SKIPPED_CUTOFF = "Held (after cut-off)"
 
 LABEL_NEW, LABEL_UPDATED, LABEL_REMOVED = "New", "Updated", "Removed in cloud"
 LABEL_NEW_UNLOGGED = "New (not in log)"
@@ -203,9 +209,10 @@ def _classify_folder(path: str, enabled: set) -> tuple[int | None, str, str] | s
 
 
 def compare(parsed: ParsedChangeLog, event_structure: structure.EventStructure,
-            local: dict[str, LocalRecord], cutoff: datetime | None = None) -> Comparison:
-    """`cutoff` (a UTC instant, or None) is the event's own Last Updated Timestamp Cut-off (BRD 14/18): an entry
-    timestamped before it is SKIPPED_CUTOFF regardless of what it would otherwise decide."""
+            local: dict[str, LocalRecord], boundary: datetime | None = None) -> Comparison:
+    """`boundary` (a UTC instant, or None) is the event's own cut-off boundary for THIS check, already resolved
+    from its recurring daily time by `cutoff_boundary` (BRD 14/18): an entry timestamped AFTER it is
+    SKIPPED_CUTOFF regardless of what it would otherwise decide."""
     enabled = set(event_structure.enabled_pairs)
     groups: dict[str, list[tuple[CloudEntry, tuple | str]]] = {}
     for entry in parsed.entries:
@@ -237,7 +244,7 @@ def compare(parsed: ParsedChangeLog, event_structure: structure.EventStructure,
         else:
             table, led, name = where
             have = local.get(key)
-            action, label, reason = _decide(latest, have, cutoff)
+            action, label, reason = _decide(latest, have, boundary)
             out.append(Assessment(latest.path, table, led, name, latest.status, latest.timestamp_text, latest.timestamp,
                                   action, label, reason, count, have.status if have else ""))
     out.sort(key=_sort_key)
@@ -250,7 +257,7 @@ def _sort_key(a: Assessment):
 
 
 def add_azure_files(comparison: Comparison, storage, location, event_structure: structure.EventStructure,
-                    local: dict[str, LocalRecord], cutoff: datetime | None = None) -> Comparison:
+                    local: dict[str, LocalRecord], boundary: datetime | None = None) -> Comparison:
     """Also compare Azure's own file list: files in an enabled Table / LED folder that the change log never mentions
     are offered for download (unless already stored). Read-only listing; a problem is reported, never fatal.
 
@@ -297,9 +304,9 @@ def add_azure_files(comparison: Comparison, storage, location, event_structure: 
             have = local.get(key)
             stamp = info.modified or now_text                         # a valid time for the history even if Azure gave none
             stamp_time = parse_timestamp(stamp) or epoch
-            if have is None and cutoff is not None and stamp_time < cutoff:
+            if have is None and boundary is not None and stamp_time > boundary:
                 action, label, reason = SKIPPED_CUTOFF, LABEL_SKIPPED_CUTOFF, \
-                    "In Azure but not in the change log, and before this event's timestamp cut-off."
+                    "In Azure but not in the change log, and changed after the timestamp cut-off; held until the next window."
             elif have is None:
                 action, label, reason = DOWNLOAD, LABEL_NEW_UNLOGGED, "In Azure but not in the change log."
             else:
@@ -318,15 +325,16 @@ def add_azure_files(comparison: Comparison, storage, location, event_structure: 
     return replace(comparison, assessments=tuple(merged), azure_note=note)
 
 
-def _decide(latest: CloudEntry, have: LocalRecord | None, cutoff: datetime | None = None) -> tuple[str, str, str]:
-    """`cutoff` only ever suppresses NEW WORK (a DOWNLOAD or DELETE this would otherwise queue); something already
-    DONE is left exactly as it is, so setting a cut-off never turns an already-processed file into anything else."""
-    before_cutoff = cutoff is not None and latest.timestamp < cutoff
+def _decide(latest: CloudEntry, have: LocalRecord | None, boundary: datetime | None = None) -> tuple[str, str, str]:
+    """`boundary` only ever HOLDS BACK new work (a DOWNLOAD or DELETE this would otherwise queue) that is timestamped
+    after it; something already DONE is left exactly as it is, so the cut-off never turns an already-processed file
+    into anything else, and nothing held is lost - it is reconsidered, fresh, on every later check."""
+    held_back = boundary is not None and latest.timestamp > boundary
     if latest.status == "Deleted":
         if have is not None and have.status == "Success" and have.source_time < latest.timestamp:
-            if before_cutoff:
+            if held_back:
                 return (SKIPPED_CUTOFF, LABEL_SKIPPED_CUTOFF,
-                        "Removed in the cloud, but before this event's timestamp cut-off; the local copy is kept.")
+                        "Removed in the cloud after the timestamp cut-off; the local copy is kept until the next window.")
             return DELETE, LABEL_REMOVED, "Removed in the cloud after it was downloaded; the local copy will be deleted."
         if have is None:
             return DONE, DONE, "Removed in the cloud; nothing is stored locally."
@@ -335,79 +343,88 @@ def _decide(latest: CloudEntry, have: LocalRecord | None, cutoff: datetime | Non
         return DONE, DONE, "The removal has already been processed."
     # New or Updated
     if have is None:
-        if before_cutoff:
-            return SKIPPED_CUTOFF, LABEL_SKIPPED_CUTOFF, "Before this event's timestamp cut-off, so it was not downloaded."
+        if held_back:
+            return SKIPPED_CUTOFF, LABEL_SKIPPED_CUTOFF, "Changed after the timestamp cut-off; held until the next window."
         return DOWNLOAD, LABEL_NEW, "Not downloaded yet."
     if have.source_time < latest.timestamp:
-        if before_cutoff:
-            return SKIPPED_CUTOFF, LABEL_SKIPPED_CUTOFF, "Before this event's timestamp cut-off, so it was not downloaded."
+        if held_back:
+            return SKIPPED_CUTOFF, LABEL_SKIPPED_CUTOFF, "Changed after the timestamp cut-off; held until the next window."
         if have.status == "Deleted":
             return DOWNLOAD, LABEL_NEW, "Added again in the cloud after it was removed."
         return DOWNLOAD, LABEL_UPDATED, "Changed in the cloud after it was last downloaded."
     return DONE, DONE, "Already downloaded or removed at or after this change."
 
 
-# --- per-event timestamp cut-off (BRD 14/18, Phase 10) --------------------------------------------------
+# --- per-event, recurring daily timestamp cut-off (BRD 14/18, Phase 10) --------------------------------------
 
 class CutoffError(ValueError):
     """A rejected cut-off value; the message is safe to show."""
 
 
-def load_cutoff_text(conn: sqlite3.Connection, event_id: str) -> str:
-    """The saved cut-off, as stored (UTC ISO text, or "" for none)."""
-    row = conn.execute("SELECT cutoff_timestamp FROM events WHERE event_id = ? COLLATE NOCASE",
+_CUTOFF_TIME_RE = re.compile(r"^([01]\d|2[0-3]):([0-5]\d)$")
+
+
+@dataclass(frozen=True)
+class CutoffSettings:
+    enabled: bool
+    time: str                  # "" or "HH:MM" (24-hour UTC); kept even while disabled, so it need not be retyped
+
+
+def load_cutoff_settings(conn: sqlite3.Connection, event_id: str) -> CutoffSettings:
+    row = conn.execute("SELECT cutoff_enabled, cutoff_time FROM events WHERE event_id = ? COLLATE NOCASE",
                        (event_id,)).fetchone()
-    return (row["cutoff_timestamp"] or "") if row and row["cutoff_timestamp"] else ""
+    if row is None:
+        return CutoffSettings(False, "")
+    return CutoffSettings(bool(row["cutoff_enabled"]), row["cutoff_time"] or "")
 
 
-def load_cutoff(conn: sqlite3.Connection, event_id: str) -> datetime | None:
-    """The saved cut-off as a UTC instant, or None if there is not one."""
-    return parse_timestamp(load_cutoff_text(conn, event_id))
-
-
-def validate_cutoff(text: str) -> str:
-    """"" (no cut-off) or a UTC ISO timestamp. A bare `YYYY-MM-DDTHH:MM` (what an HTML `datetime-local`
-    box sends) has no offset and is treated as UTC, like every other timestamp in this application -
-    never this computer's local clock."""
+def validate_cutoff_time(text: str) -> str:
+    """"" (no time set) or "HH:MM" in 24-hour UTC."""
     value = (text or "").strip()
     if not value:
         return ""
-    parsed = parse_timestamp(value)
-    if parsed is None:
-        # A value that parses as a real date/time but falls outside the range this application accepts anywhere
-        # (see events.parse_timestamp) gets its own message, so "a real year, just too old/new" is never confused
-        # with "not a date at all".
-        candidate = value[:-1] + "+00:00" if value.endswith(("Z", "z")) else value
-        try:
-            year = datetime.fromisoformat(candidate).year
-        except (ValueError, OverflowError):
-            year = None
-        if year is not None and not (MIN_YEAR <= year <= MAX_YEAR):
-            raise CutoffError(f"Enter a year between {MIN_YEAR} and {MAX_YEAR}.")
-        raise CutoffError("Enter a date and time (for example 2026-09-01T00:00), or leave it blank for no cut-off.")
-    return parsed.astimezone(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+    if not _CUTOFF_TIME_RE.match(value):
+        raise CutoffError("Enter the time as HH:MM in 24-hour UTC (for example 21:00), or leave it blank.")
+    return value
 
 
-def save_cutoff(conn: sqlite3.Connection, event_id: str, text: str) -> bool:
+def save_cutoff_settings(conn: sqlite3.Connection, event_id: str, enabled: bool, time_text: str) -> bool:
     """Validate and save the event's own cut-off (never another event's). Returns whether it changed."""
-    value = validate_cutoff(text)
+    time_value = validate_cutoff_time(time_text)
+    if enabled and not time_value:
+        raise CutoffError("Enter a cut-off time before turning it on.")
     try:
-        before = load_cutoff_text(conn, event_id)
-        changed = before != value
+        before = load_cutoff_settings(conn, event_id)
+        changed = before != CutoffSettings(enabled, time_value)
         if changed:
-            done = conn.execute("UPDATE events SET cutoff_timestamp = ? WHERE event_id = ? COLLATE NOCASE",
-                                (value or None, event_id)).rowcount
+            done = conn.execute("UPDATE events SET cutoff_enabled = ?, cutoff_time = ? WHERE event_id = ? COLLATE NOCASE",
+                                (1 if enabled else 0, time_value or None, event_id)).rowcount
             if not done:
                 raise CutoffError("That event is not registered.")
         oplog.add(conn, "Settings Changed", "Success",
-                  (f"Timestamp cut-off set to {value} for event {event_id}." if value
-                   else f"Timestamp cut-off cleared for event {event_id}.") if changed
+                  (f"Timestamp cut-off {'enabled' if enabled else 'disabled'}"
+                   + (f", time {time_value}" if time_value else "") + f" for event {event_id}.") if changed
                   else f"Timestamp cut-off unchanged for event {event_id}.", event_id)
         conn.commit()
     except sqlite3.Error:
         conn.rollback()
         raise CutoffError("The cut-off could not be saved. Try again.") from None
     return changed
+
+
+def cutoff_boundary(settings: CutoffSettings, now: datetime | None = None) -> datetime | None:
+    """The UTC instant this check must hold new work back to, or None if the cut-off is off (or has no time set):
+    the most recent PAST occurrence of the daily cut-off time - today's, if it has already happened today;
+    otherwise yesterday's. A change timestamped after this instant is held until the boundary next moves past it
+    (naturally, once real time carries it there on a later check)."""
+    if not settings.enabled or not settings.time:
+        return None
+    now = now or datetime.now(timezone.utc)
+    hour, minute = (int(part) for part in settings.time.split(":"))
+    candidate = now.replace(hour=hour, minute=minute, second=0, microsecond=0)
+    if candidate > now:
+        candidate -= timedelta(days=1)
+    return candidate
 
 
 # --- the whole check ------------------------------------------------------------------------------------
@@ -477,9 +494,9 @@ def check_event(conn: sqlite3.Connection, storage, settings, event_id: str) -> R
         parsed = fetch_change_log(storage, fetched.location)
         marker = history_marker(conn, event_id)
         local = local_state(conn, event_id)
-        cutoff = load_cutoff(conn, event_id)
-        comparison = compare(parsed, event_structure, local, cutoff)
-        comparison = add_azure_files(comparison, storage, fetched.location, event_structure, local, cutoff)
+        boundary = cutoff_boundary(load_cutoff_settings(conn, event_id))
+        comparison = compare(parsed, event_structure, local, boundary)
+        comparison = add_azure_files(comparison, storage, fetched.location, event_structure, local, boundary)
     except CheckError as err:
         _log_failure(conn, event_id, operation, err.category, err.message)
         raise
@@ -498,7 +515,7 @@ def check_event(conn: sqlite3.Connection, storage, settings, event_id: str) -> R
                  f"{comparison.count(DONE)} already processed, {comparison.count(NOT_APPLICABLE)} not applicable, "
                  f"{len(comparison.skipped)} unreadable row(s) in {comparison.source_name}; "
                  f"{comparison.count_label(LABEL_NEW_UNLOGGED)} file(s) found in Azure but not in the change log"
-                 + (f"; {skipped_cutoff} skipped (before the timestamp cut-off)." if skipped_cutoff else "."), event_id)
+                 + (f"; {skipped_cutoff} held back by the timestamp cut-off." if skipped_cutoff else "."), event_id)
     exceptions.resolve_matching(conn, event_id, operation)                   # an earlier failed check of this event is over
     try:
         conn.commit()

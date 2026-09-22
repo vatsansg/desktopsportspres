@@ -67,3 +67,28 @@ document.addEventListener("DOMContentLoaded", function () {
   tick();
   setInterval(tick, 30000);
 });
+
+// A live "= H:MM local time today" preview next to a UTC time-of-day box (the recurring timestamp
+// cut-off): converts what was typed using today's date in this browser's own time zone, so the
+// operator can see at a glance what the UTC value they typed means on their own clock, without the
+// application ever treating anything but UTC as authoritative.
+document.addEventListener("DOMContentLoaded", function () {
+  var fields = document.querySelectorAll("[data-utc-time-preview]");
+  for (var i = 0; i < fields.length; i++) {
+    (function (field) {
+      var target = document.getElementById(field.getAttribute("data-utc-time-preview"));
+      if (!target) return;
+      function update() {
+        var parts = (field.value || "").split(":");
+        if (parts.length !== 2) { target.textContent = ""; return; }
+        var hour = parseInt(parts[0], 10), minute = parseInt(parts[1], 10);
+        if (isNaN(hour) || isNaN(minute)) { target.textContent = ""; return; }
+        var now = new Date();
+        var asUtc = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate(), hour, minute));
+        target.textContent = "= " + asUtc.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }) + " local time today";
+      }
+      field.addEventListener("input", update);
+      update();
+    })(fields[i]);
+  }
+});

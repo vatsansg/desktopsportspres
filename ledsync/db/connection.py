@@ -43,7 +43,7 @@ def init_db(db_path: Path) -> None:
             )
         conn.executescript(DDL)
         _ensure_event_id_index(conn)
-        _ensure_events_cutoff_column(conn)
+        _ensure_events_cutoff_columns(conn)
         if version == 0:
             conn.execute(f"PRAGMA user_version = {SCHEMA_VERSION}")
         conn.commit()
@@ -67,13 +67,15 @@ def _ensure_event_id_index(conn: sqlite3.Connection) -> None:
             "events already holds Event IDs that differ only by case; the uniqueness index was not created.")
 
 
-def _ensure_events_cutoff_column(conn: sqlite3.Connection) -> None:
-    """A database created before Phase 10 has no `events.cutoff_timestamp` column (`CREATE TABLE IF NOT
-    EXISTS` never alters an existing table). Added at the end, matching where a fresh database's DDL
-    puts it, so `_verify`'s column-order check passes either way. Idempotent."""
+def _ensure_events_cutoff_columns(conn: sqlite3.Connection) -> None:
+    """A database created before Phase 10 has neither `events.cutoff_enabled` nor `events.cutoff_time`
+    (`CREATE TABLE IF NOT EXISTS` never alters an existing table). Added at the end, in the same order as a
+    fresh database's DDL, so `_verify`'s column-order check passes either way. Idempotent."""
     columns = {r["name"] for r in conn.execute("PRAGMA table_info(events)")}
-    if "cutoff_timestamp" not in columns:
-        conn.execute("ALTER TABLE events ADD COLUMN cutoff_timestamp TEXT")
+    if "cutoff_enabled" not in columns:
+        conn.execute("ALTER TABLE events ADD COLUMN cutoff_enabled INTEGER NOT NULL DEFAULT 0")
+    if "cutoff_time" not in columns:
+        conn.execute("ALTER TABLE events ADD COLUMN cutoff_time TEXT")
 
 
 def _verify(conn: sqlite3.Connection) -> None:

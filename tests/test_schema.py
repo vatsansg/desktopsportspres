@@ -30,7 +30,7 @@ BRD_SECTION_26_COLUMNS = {
 
 # Approved extensions (20 Sep 2026): Section 7.1 config JSON + Section 21.1 exception fields.
 APPROVED_EXTENSIONS = {
-    "events": {"configuration_json", "cutoff_timestamp"},
+    "events": {"configuration_json", "cutoff_enabled", "cutoff_time"},
     "exception_log": {"table_number", "led_type", "file_name", "source", "destination"},
 }
 
@@ -155,7 +155,7 @@ def test_init_creates_missing_parent_directory(tmp_path):
     assert db.exists()
 
 
-def test_a_database_from_before_phase_10_gains_the_cutoff_column_in_the_right_place(cfg):
+def test_a_database_from_before_phase_10_gains_the_cutoff_columns_in_the_right_place(cfg):
     """`CREATE TABLE IF NOT EXISTS` never alters a table that already exists, so an upgrade from an
     earlier version needs its own step - added at the END, matching a fresh database's column order."""
     conn = sqlite3.connect(cfg.db_path)
@@ -171,8 +171,8 @@ def test_a_database_from_before_phase_10_gains_the_cutoff_column_in_the_right_pl
     conn = connect(cfg.db_path)
     try:
         assert [r["name"] for r in conn.execute("PRAGMA table_info(events)")] == TABLES["events"]
-        row = conn.execute("SELECT event_name, cutoff_timestamp FROM events WHERE event_id = '1000'").fetchone()
-        assert row["event_name"] == "Old Event" and row["cutoff_timestamp"] is None    # the old row survives untouched
+        row = conn.execute("SELECT event_name, cutoff_enabled, cutoff_time FROM events WHERE event_id = '1000'").fetchone()
+        assert row["event_name"] == "Old Event" and row["cutoff_enabled"] == 0 and row["cutoff_time"] is None  # old row survives
         init_db(cfg.db_path)                                       # running it again is a no-op
         assert [r["name"] for r in conn.execute("PRAGMA table_info(events)")] == TABLES["events"]
     finally:

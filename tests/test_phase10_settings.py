@@ -4,6 +4,7 @@ timestamp cut-off, and the fuller Dashboard Actions column (Steps 10.1, 10.2).""
 import re
 import threading
 import time
+from datetime import datetime
 
 import pytest
 from conftest import csrf_from, db_rows, do_login
@@ -236,28 +237,47 @@ def test_the_settings_nav_lists_every_section(logged_in):
         assert label in html
 
 
-# --- per-event timestamp cut-off (changes.py) -------------------------------------------------------------------------------------
+# --- per-event, recurring daily timestamp cut-off (changes.py) -----------------------------------------------------------------
 
-def test_cutoff_default_is_blank_and_compares_everything(world_conn):
+def test_cutoff_default_is_off_and_compares_everything(world_conn):
     conn = world_conn
-    assert changes.load_cutoff(conn, "1000") is None
-    assert changes.load_cutoff_text(conn, "1000") == ""
+    assert changes.load_cutoff_settings(conn, "1000") == changes.CutoffSettings(False, "")
+    assert changes.cutoff_boundary(changes.load_cutoff_settings(conn, "1000")) is None
 
 
-def test_save_cutoff_validates_normalises_to_utc_and_is_per_event(world_conn):
+def test_save_cutoff_validates_is_per_event_and_needs_a_time_to_enable(world_conn):
     conn = world_conn
     conn.execute("INSERT INTO events (event_id, event_name, event_guid) VALUES ('2000', 'y', 'g2')")
     conn.commit()
-    assert changes.save_cutoff(conn, "1000", "2026-09-01T00:00") is True
-    assert changes.load_cutoff_text(conn, "1000") == "2026-09-01T00:00:00Z"
-    assert changes.load_cutoff_text(conn, "2000") == ""                              # the other event is untouched
-    assert changes.save_cutoff(conn, "1000", "2026-09-01T00:00") is False            # no change
-    assert changes.save_cutoff(conn, "1000", "") is True
-    assert changes.load_cutoff(conn, "1000") is None
     with pytest.raises(changes.CutoffError):
-        changes.save_cutoff(conn, "1000", "not a date")
+        changes.save_cutoff_settings(conn, "1000", True, "")                     # enabling needs a time
+    assert changes.save_cutoff_settings(conn, "1000", True, "21:00") is True
+    assert changes.load_cutoff_settings(conn, "1000") == changes.CutoffSettings(True, "21:00")
+    assert changes.load_cutoff_settings(conn, "2000") == changes.CutoffSettings(False, "")   # the other event is untouched
+    assert changes.save_cutoff_settings(conn, "1000", True, "21:00") is False     # no change
+    assert changes.save_cutoff_settings(conn, "1000", False, "21:00") is True     # disabled, time kept (not retyped)
+    assert changes.load_cutoff_settings(conn, "1000") == changes.CutoffSettings(False, "21:00")
+    for bad in ("25:00", "9:30", "21", "not a time"):
+        with pytest.raises(changes.CutoffError):
+            changes.save_cutoff_settings(conn, "1000", False, bad)
     with pytest.raises(changes.CutoffError):
-        changes.save_cutoff(conn, "9999", "2026-09-01T00:00")                        # unregistered event
+        changes.save_cutoff_settings(conn, "9999", True, "21:00")                # unregistered event
+
+
+def test_cutoff_boundary_is_the_most_recent_past_occurrence_of_the_time():
+    from datetime import timezone
+    settings = changes.CutoffSettings(True, "21:00")
+    # "now" is after today's 21:00: the boundary is today's occurrence
+    now = datetime(2026, 9, 22, 22, 30, tzinfo=timezone.utc)
+    assert changes.cutoff_boundary(settings, now) == datetime(2026, 9, 22, 21, 0, tzinfo=timezone.utc)
+    # "now" is before today's 21:00 has happened: the boundary is still yesterday's
+    now = datetime(2026, 9, 22, 6, 0, tzinfo=timezone.utc)
+    assert changes.cutoff_boundary(settings, now) == datetime(2026, 9, 21, 21, 0, tzinfo=timezone.utc)
+    # exactly at the cut-off time: that instant counts as "already passed" (inclusive)
+    now = datetime(2026, 9, 22, 21, 0, tzinfo=timezone.utc)
+    assert changes.cutoff_boundary(settings, now) == now
+    assert changes.cutoff_boundary(changes.CutoffSettings(False, "21:00"), now) is None    # disabled: no boundary
+    assert changes.cutoff_boundary(changes.CutoffSettings(True, ""), now) is None          # no time set: no boundary
 
 
 def _entry(path, status, ts, line=1):
@@ -271,76 +291,103 @@ def _parsed(*entries):
     return ParsedChangeLog(tuple(entries), (), "_ledassetschangelog.csv")
 
 
-def test_decide_skips_new_work_before_the_cutoff_but_leaves_already_done_files_alone():
-    from datetime import timezone
+def test_decide_holds_new_work_after_the_boundary_but_leaves_already_done_files_alone():
     from ledsync.services.events import parse_timestamp
-    cutoff = parse_timestamp("2026-09-15T00:00:00Z")
-    old_new = _entry("Table 1/Inner/old.png", "New", "2026-09-01T00:00:00Z")
-    new_new = _entry("Table 1/Inner/new.png", "New", "2026-09-20T00:00:00Z")
+    boundary = parse_timestamp("2026-09-15T21:00:00Z")
+    before = _entry("Table 1/Inner/before.png", "New", "2026-09-15T20:00:00Z")     # before the boundary: eligible
+    after = _entry("Table 1/Inner/after.png", "New", "2026-09-15T22:00:00Z")       # after the boundary: held
+    exactly = _entry("Table 1/Inner/exactly.png", "New", "2026-09-15T21:00:00Z")   # exactly on it: eligible (inclusive)
     struct = real_structure()
-    local = {}
-    parsed = _parsed(old_new, new_new)
-    out = changes.compare(parsed, struct, local, cutoff)
+    out = changes.compare(_parsed(before, after, exactly), struct, {}, boundary)
     by_name = {a.file_name: a for a in out.assessments}
-    assert by_name["old.png"].action == changes.SKIPPED_CUTOFF
-    assert by_name["new.png"].action == changes.DOWNLOAD
-    # an already-processed old file stays DONE, not reclassified as skipped
+    assert by_name["before.png"].action == changes.DOWNLOAD
+    assert by_name["exactly.png"].action == changes.DOWNLOAD
+    assert by_name["after.png"].action == changes.SKIPPED_CUTOFF
+    # an already-processed file held by an earlier boundary stays DONE once it is no longer held, not reclassified
     from ledsync.services.changes import LocalRecord
-    local2 = {changes.path_key(1, "Inner", "old.png"): LocalRecord("Success", parse_timestamp("2026-09-10T00:00:00Z"))}
-    out2 = changes.compare(_parsed(old_new), struct, local2, cutoff)
+    local2 = {changes.path_key(1, "Inner", "before.png"): LocalRecord("Success", parse_timestamp("2026-09-15T20:30:00Z"))}
+    out2 = changes.compare(_parsed(before), struct, local2, boundary)
     assert out2.assessments[0].action == changes.DONE
 
 
-def test_a_deletion_before_the_cutoff_keeps_the_local_copy():
+def test_a_file_held_by_the_boundary_is_downloaded_once_the_boundary_moves_past_it():
+    """The held file from the previous test becomes eligible once a LATER boundary (the next day's) passes it -
+    nothing about it is stored; it is simply reconsidered fresh on the next check."""
+    from ledsync.services.events import parse_timestamp
+    late = _entry("Table 1/Inner/late.png", "New", "2026-09-15T22:00:00Z")
+    struct = real_structure()
+    held = changes.compare(_parsed(late), struct, {}, parse_timestamp("2026-09-15T21:00:00Z"))
+    assert held.assessments[0].action == changes.SKIPPED_CUTOFF
+    next_day = changes.compare(_parsed(late), struct, {}, parse_timestamp("2026-09-16T21:00:00Z"))
+    assert next_day.assessments[0].action == changes.DOWNLOAD
+
+
+def test_a_deletion_after_the_boundary_keeps_the_local_copy_for_now():
     from ledsync.services.changes import LocalRecord
     from ledsync.services.events import parse_timestamp
-    cutoff = parse_timestamp("2026-09-15T00:00:00Z")
-    deleted = _entry("Table 1/Inner/a.png", "Deleted", "2026-09-05T00:00:00Z")
+    boundary = parse_timestamp("2026-09-15T21:00:00Z")
+    deleted = _entry("Table 1/Inner/a.png", "Deleted", "2026-09-15T22:00:00Z")       # after the boundary
     local = {changes.path_key(1, "Inner", "a.png"): LocalRecord("Success", parse_timestamp("2026-09-01T00:00:00Z"))}
-    out = changes.compare(_parsed(deleted), real_structure(), local, cutoff)
+    out = changes.compare(_parsed(deleted), real_structure(), local, boundary)
     assert out.assessments[0].action == changes.SKIPPED_CUTOFF
 
 
-def test_the_cutoff_also_applies_to_azure_only_unlogged_files(monkeypatch):
+def test_the_boundary_also_applies_to_azure_only_unlogged_files(monkeypatch):
     from ledsync.services.events import parse_timestamp
     from ledsync.services.storage import BlobInfo, EventLocation
 
     class FakeStorage:
         def list_files(self, location, folder, listings=None):
             if folder == "Table 1/Inner":
-                return [BlobInfo("Table 1/Inner/old.png", 10, None, "2026-09-01T00:00:00Z", "etag")]
+                return [BlobInfo("Table 1/Inner/late.png", 10, None, "2026-09-15T22:00:00Z", "etag")]
             return []
-    cutoff = parse_timestamp("2026-09-15T00:00:00Z")
+    boundary = parse_timestamp("2026-09-15T21:00:00Z")
     struct = real_structure()
     base = changes.compare(_parsed(), struct, {})
-    out = changes.add_azure_files(base, FakeStorage(), EventLocation("2026", "1000 - x"), struct, {}, cutoff)
-    assert [a.action for a in out.assessments if a.file_name == "old.png"] == [changes.SKIPPED_CUTOFF]
+    out = changes.add_azure_files(base, FakeStorage(), EventLocation("2026", "1000 - x"), struct, {}, boundary)
+    assert [a.action for a in out.assessments if a.file_name == "late.png"] == [changes.SKIPPED_CUTOFF]
 
 
 def test_check_event_uses_the_saved_cutoff_and_counts_it_in_the_summary(ev, cfg):
-    seed(ev)
+    from datetime import timedelta, timezone
+    from phase6_helpers import csv_text
+    from test_phase8_sync import put
+    put(ev, "Table 1/inner/a.png", b"inner a")
+    # a boundary is always within the last 24h of "now"; a change dated two days ahead is after it regardless of when
+    # this test happens to run, so it is reliably held (an ordinary changelog entry is never really future-dated -
+    # this only exercises the mechanism, and a future-dated entry is reported separately, not blocked, either way).
+    future = (datetime.now(timezone.utc) + timedelta(days=2)).strftime("%Y-%m-%dT%H:%M:%S.000Z")
+    put(ev, "_ledassetschangelog.csv", csv_text([("Table 1/Inner/a.png", future, "New")]))
     conn = connect(cfg.db_path)
-    changes.save_cutoff(conn, "1000", "2030-01-01T00:00")                            # everything is before this
+    changes.save_cutoff_settings(conn, "1000", True, "12:00")
     conn.close()
     out = text_of(ev.post("/events/1000/changes/check", data={"csrf_token": tok(ev, "/events/1000/changes")},
                           follow_redirects=True).get_data(as_text=True))
-    assert "skipped (before the timestamp cut-off)" in text_of(
+    assert "held back by the timestamp cut-off" in text_of(
         db_rows(cfg, "SELECT message FROM operation_log WHERE operation = 'Check Changes'")[-1]["message"])
-    assert "Skipped (Before Cut" in out or "skipped" in out.lower()
+    assert "Held (After Cut" in out or "held" in out.lower()
 
 
 # --- the cut-off form on the Device Mapping page ------------------------------------------------------------------------------
 
 def test_the_cutoff_form_saves_validates_and_needs_csrf_and_login(ev, cfg, client, launched):
-    assert client.post("/events/1000/cutoff", data={"cutoff": "2026-09-01T00:00"}).status_code == 403
-    out = text_of(ev.post("/events/1000/cutoff", data={"csrf_token": tok(ev, "/events/1000"), "cutoff": "2026-09-01T00:00"},
-                          follow_redirects=True).get_data(as_text=True))
+    assert client.post("/events/1000/cutoff", data={"cutoff_enabled": "1", "cutoff_time": "21:00"}).status_code == 403
+    out = text_of(ev.post("/events/1000/cutoff", data={"csrf_token": tok(ev, "/events/1000"), "cutoff_enabled": "1",
+                                                        "cutoff_time": "21:00"}, follow_redirects=True).get_data(as_text=True))
     assert "Timestamp cut-off saved." in out
     html = ev.get("/events/1000").get_data(as_text=True)
-    assert 'value="2026-09-01T00:00"' in html
-    bad = ev.post("/events/1000/cutoff", data={"csrf_token": tok(ev, "/events/1000"), "cutoff": "nonsense"})
-    assert bad.status_code == 400 and "date and time" in text_of(bad.get_data(as_text=True))
-    assert ev.post("/events/9999/cutoff", data={"csrf_token": tok(ev, "/events/1000"), "cutoff": ""}).status_code == 404
+    assert 'value="21:00"' in html and 'name="cutoff_enabled" value="1" checked' in html
+    bad = ev.post("/events/1000/cutoff", data={"csrf_token": tok(ev, "/events/1000"), "cutoff_time": "nonsense"})
+    assert bad.status_code == 400 and "24-hour UTC" in text_of(bad.get_data(as_text=True))
+    without_time = ev.post("/events/1000/cutoff", data={"csrf_token": tok(ev, "/events/1000"), "cutoff_enabled": "1"})
+    assert without_time.status_code == 400 and "before turning it on" in text_of(without_time.get_data(as_text=True))
+    assert ev.post("/events/9999/cutoff", data={"csrf_token": tok(ev, "/events/1000"), "cutoff_time": ""}).status_code == 404
+    # unchecking the box turns it off but keeps the time (no need to retype it)
+    off = text_of(ev.post("/events/1000/cutoff", data={"csrf_token": tok(ev, "/events/1000"), "cutoff_time": "21:00"},
+                          follow_redirects=True).get_data(as_text=True))
+    assert "Timestamp cut-off saved." in off
+    html = ev.get("/events/1000").get_data(as_text=True)
+    assert 'value="21:00"' in html and 'name="cutoff_enabled" value="1" checked' not in html
 
 
 # --- startup log retention pruning -------------------------------------------------------------------------------------------------
@@ -478,16 +525,14 @@ def test_run_job_passes_the_saved_retry_setting_down_as_a_plain_argument_never_a
     assert (transfer.RETRY_COUNT, transfer.RETRY_DELAY) == before         # ... and are still untouched afterwards
 
 
-def test_an_out_of_range_cutoff_year_gets_its_own_clear_message(world_conn):
+def test_a_malformed_cutoff_time_is_refused_with_a_plain_message(world_conn):
     conn = world_conn
-    with pytest.raises(changes.CutoffError, match="between 1970 and 2098"):
-        changes.save_cutoff(conn, "1000", "2099-01-01T00:00")
-    with pytest.raises(changes.CutoffError, match="between 1970 and 2098"):
-        changes.save_cutoff(conn, "1000", "1900-01-01T00:00")
-    with pytest.raises(changes.CutoffError, match="Enter a date and time"):
-        changes.save_cutoff(conn, "1000", "not a date at all")
+    for bad in ("25:00", "12:60", "9:30", "9am", "not a time at all", "21:00:00"):
+        with pytest.raises(changes.CutoffError, match="24-hour UTC"):
+            changes.save_cutoff_settings(conn, "1000", False, bad)
 
 
-def test_the_cutoff_field_shows_a_live_utc_clock_reminder(ev):
+def test_the_cutoff_field_shows_a_live_utc_clock_and_a_local_time_preview(ev):
     html = ev.get("/events/1000").get_data(as_text=True)
     assert "data-utc-clock" in html and "enter in <strong>UTC</strong>" in html
+    assert 'data-utc-time-preview="cutoff-time-local"' in html and 'data-utc-time-target' in html

@@ -58,22 +58,15 @@ def _rows(event_id: str, posted: dict | None = None):
     return out
 
 
-def _cutoff_display(text: str) -> str:
-    """A saved UTC ISO cut-off (`2026-09-01T00:00:00Z`) as an HTML `datetime-local` value
-    (`2026-09-01T00:00`); "" unchanged. Never raises - an unreadable value just shows empty."""
-    if not text:
-        return ""
-    trimmed = text[:-1] if text.endswith(("Z", "z")) else text
-    return trimmed[:16]
-
-
-def _render(row, struct, status=200, posted=None, error=None, cutoff_typed=None, cutoff_error=None):
+def _render(row, struct, status=200, posted=None, error=None, cutoff_enabled=None, cutoff_time_typed=None,
+           cutoff_error=None):
     hidden = [m for m in mappings.list_mappings(get_db(), row["event_id"], enabled=False) if m.shared_folder]
+    saved_cutoff = changes.load_cutoff_settings(get_db(), row["event_id"])
     ctx = dict(app_name=APP_NAME, version=__version__, username=session.get("user"), event=row,
                structure=struct, structure_error=None, rows=_rows(row["event_id"], posted), hidden=hidden,
                led_types=structure.LED_TYPES, led_labels=structure.LED_LABELS, error=error,
-               cutoff_typed=(_cutoff_display(changes.load_cutoff_text(get_db(), row["event_id"]))
-                            if cutoff_typed is None else cutoff_typed),
+               cutoff_enabled=(saved_cutoff.enabled if cutoff_enabled is None else cutoff_enabled),
+               cutoff_time_typed=(saved_cutoff.time if cutoff_time_typed is None else cutoff_time_typed),
                cutoff_error=cutoff_error)
     return render_template("event_details.html", **ctx), status
 
@@ -112,11 +105,12 @@ def save_cutoff(event_id):
         struct = structure.load_structure(db, row["event_id"])
     except structure.StructureError:
         abort(400)
-    typed = request.form.get("cutoff", "")[:40]
+    enabled = request.form.get("cutoff_enabled") == "1"
+    time_typed = request.form.get("cutoff_time", "")[:10]
     try:
-        changed = changes.save_cutoff(db, row["event_id"], typed)
+        changed = changes.save_cutoff_settings(db, row["event_id"], enabled, time_typed)
     except changes.CutoffError as err:
-        return _render(row, struct, 400, cutoff_typed=typed, cutoff_error=str(err))
+        return _render(row, struct, 400, cutoff_enabled=enabled, cutoff_time_typed=time_typed, cutoff_error=str(err))
     flash("Timestamp cut-off saved." if changed else "Nothing changed — the cut-off was already saved.",
           "success" if changed else "info")
     return redirect(url_for("devices.details", event_id=row["event_id"]))
