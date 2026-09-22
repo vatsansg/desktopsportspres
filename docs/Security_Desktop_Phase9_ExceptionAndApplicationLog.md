@@ -89,4 +89,4 @@ Status values: **Pass**, **Fail**, **N/A at this stage**, **Accepted risk** (BRD
 |---|---|---|---|
 | Owner-reported defect (22/09/26) | Vatsan | 22/09/26 | "not seeing the export file … need a pop up message to confirm the file exported" — root cause: `pywebview`'s default `ALLOW_DOWNLOADS = False` cancels every download before it starts, with no error shown anywhere. Fixed same day (F-67, D5a); covered by a new regression test (`test_downloads_are_allowed_before_the_window_opens`) that runs the real startup path with a faked `webview` module. |
 | Independent Solution Architect review | Independent review agent (fresh context) | 22/09/26 | **Approved with notes after fixes** - see S-60, S-61 (both reproduced and fixed; 3 regression tests; **not re-reviewed**). |
-| User (Vatsan) go-ahead | Vatsan | pending | pending |
+| User (Vatsan) go-ahead | Vatsan | 22/09/26 | Approved after the manual test (including the export/download defect found and fixed during testing). |

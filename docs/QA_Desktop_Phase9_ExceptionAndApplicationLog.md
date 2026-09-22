@@ -57,7 +57,7 @@ Clean up: close the app, then `Remove-Item -Recurse -Force "$env:TEMP\ledsync-te
 
 | Total cases | Passed | Failed | Blocked | Not yet run |
 |---|---|---|---|---|
-| 32 | 18 (automated groups covering 30 new pytest cases plus all earlier tests, and 1 rendered-page group — all run by Claude) | 0 | 0 | 15 (manual TC-M01 – TC-M15, for the owner) |
+| 32 | 32 (automated groups covering 30 new pytest cases plus all earlier tests, and 1 rendered-page group — all run by Claude; 15 manual TC-M01 – TC-M15 run by the owner on 22/09/26, including the export defect found and fixed during testing: "All good") | 0 | 0 | 0 |
 
 `.\.venv\Scripts\python -m pytest -q` → **1405 passed, 13 skipped** (the skipped are the live-Azure tests, which need `--live`).
 
@@ -103,4 +103,4 @@ Clean up: close the app, then `Remove-Item -Recurse -Force "$env:TEMP\ledsync-te
 |---|---|---|---|
 | Owner-reported defect (22/09/26) | Vatsan | 22/09/26 | "not seeing the export file … need a pop up message to confirm the file exported" — root cause found (pywebview downloads disabled by default) and fixed same day; see F-67 |
 | Independent Solution Architect review | Independent review agent (fresh context) | 22/09/26 | **Approved with notes after fixes** — two "fix now" findings, both reproduced and fixed: a refused UNC device folder with no share name embedded the typed host **unquoted** in the exception and operational logs (now quoted like every sibling validation message, so the rejection scrub removes it); an astronomically large `page` value in the URL caused an unhandled `OverflowError` (500) on the Logs page (page and offset are now clamped). Also added on the reviewer's note: indexes on the log tables' `timestamp`, `event_id` and (exception log) `resolution_status` columns, ahead of real volume. 3 regression tests; **not re-reviewed**. Verified sound: auto-resolution scoping (never cross-event or cross-file), transaction safety, run-row accounting in every path, LIKE escaping, CSRF and the review redirect's whitelist, CSV formula neutralisation, date-filter exception handling. |
-| User (Vatsan) go-ahead | Vatsan | pending | pending |
+| User (Vatsan) go-ahead | Vatsan | 22/09/26 | Approved — "All good move to completing this step, commit and push to github and move to next step" |
