@@ -53,3 +53,17 @@ window.addEventListener("pageshow", function (event) {
     }
   }
 });
+
+// A plain, always-on reminder of "what UTC is right now" next to any field that needs a UTC value
+// entered (the timestamp cut-off): the native datetime-local picker carries no time-zone marking of
+// its own, so this is the cheapest way to keep the operator from typing local time by mistake.
+document.addEventListener("DOMContentLoaded", function () {
+  var clocks = document.querySelectorAll("[data-utc-clock]");
+  if (!clocks.length) return;
+  function tick() {
+    var now = new Date().toISOString().slice(0, 16).replace("T", " ") + " UTC";
+    for (var i = 0; i < clocks.length; i++) { clocks[i].textContent = now; }
+  }
+  tick();
+  setInterval(tick, 30000);
+});

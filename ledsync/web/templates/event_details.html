@@ -49,10 +49,11 @@
     <form method="post" action="{{ url_for('devices.save_cutoff', event_id=event.event_id) }}" class="panel" novalidate data-busy-text="WORKING…">
       <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
       <div class="field">
-        <label for="cutoff">Cut-off (UTC)</label>
+        <label for="cutoff">Cut-off &mdash; enter in <strong>UTC</strong>, not this computer's local time</label>
         <input id="cutoff" name="cutoff" type="datetime-local" value="{{ cutoff_typed }}"
                aria-describedby="{% if cutoff_error %}cutoff-error {% endif %}cutoff-hint">
-        <p id="cutoff-hint" class="hint">Entered in UTC, not this computer's local time.</p>
+        <p id="cutoff-hint" class="hint">The box itself has no time-zone marking &mdash; whatever you type is read as UTC. This computer's
+          current UTC time is <span id="cutoff-now-utc" class="mono" data-utc-clock></span>.</p>
       </div>
       <div class="form-actions">
         <button type="submit" class="btn btn-secondary">SAVE CUT-OFF</button>

@@ -2,6 +2,7 @@
 timestamp cut-off, and the fuller Dashboard Actions column (Steps 10.1, 10.2)."""
 
 import re
+import threading
 import time
 
 import pytest
@@ -416,3 +417,77 @@ def world_conn(cfg):
     conn.commit()
     yield conn
     conn.close()
+
+
+# --- independent-review regression: retries/delay are ordinary parameters, never a shared mutable global -------------------------
+
+def test_retry_and_delay_are_passed_explicitly_never_via_a_shared_global(monkeypatch):
+    """Two concurrent calls with DIFFERENT retries/delay must never see or leave behind each other's value - proven by
+    running them on separate threads at the same time and checking the module constants are untouched throughout."""
+    from ledsync.services.storage import StorageError
+    monkeypatch.setattr(transfer, "RETRY_COUNT", 1)               # the untouched module defaults, watched throughout
+    monkeypatch.setattr(transfer, "RETRY_DELAY", 0.2)
+    seen_a, seen_b = [], []
+    start = threading.Event()
+
+    def worker(retries, delay, seen, marker):
+        start.wait(2)
+        calls = []
+
+        def action():
+            calls.append(1)
+            seen.append((transfer.RETRY_COUNT, transfer.RETRY_DELAY))       # the untouched globals, sampled mid-flight
+            if len(calls) <= retries:
+                raise StorageError(exceptions.STORAGE_CONNECTIVITY, "busy")
+            return marker
+        assert transfer._retry(action, retries, delay) == marker
+        assert len(calls) == retries + 1
+
+    ta = threading.Thread(target=worker, args=(4, 0.01, seen_a, "a"))
+    tb = threading.Thread(target=worker, args=(1, 0.01, seen_b, "b"))
+    ta.start(), tb.start()
+    start.set()
+    ta.join(5), tb.join(5)
+    assert not ta.is_alive() and not tb.is_alive()
+    # the module defaults were never touched by either call, on either thread, at any point
+    assert set(seen_a) <= {(1, 0.2)} and set(seen_b) <= {(1, 0.2)}
+    assert (transfer.RETRY_COUNT, transfer.RETRY_DELAY) == (1, 0.2)
+
+
+def test_run_job_passes_the_saved_retry_setting_down_as_a_plain_argument_never_a_global(ev, cfg, tmp_path_factory, monkeypatch):
+    """`_run_job` must load Settings -> Download once and pass it down as an ordinary argument to every engine -
+    never assign it to `transfer.RETRY_COUNT` / `RETRY_DELAY`, which a concurrent job on another thread could also
+    be reading or restoring."""
+    from test_phase8_sync import seed, sync_all
+    conn = connect(cfg.db_path)
+    cs.save_download_settings(conn, "3", "0")
+    conn.commit()
+    conn.close()
+    map_devices(ev, cfg, tmp_path_factory)
+    seed(ev)
+    before = (transfer.RETRY_COUNT, transfer.RETRY_DELAY)
+    seen = []
+    real = sync.process
+
+    def watching(*args, **kwargs):
+        seen.append((transfer.RETRY_COUNT, transfer.RETRY_DELAY))         # sampled mid-run, from inside the job
+        return real(*args, **kwargs)
+    monkeypatch.setattr(sync, "process", watching)
+    sync_all(ev)
+    assert seen and set(seen) == {before}                                # the module defaults were never touched
+    assert (transfer.RETRY_COUNT, transfer.RETRY_DELAY) == before         # ... and are still untouched afterwards
+
+
+def test_an_out_of_range_cutoff_year_gets_its_own_clear_message(world_conn):
+    conn = world_conn
+    with pytest.raises(changes.CutoffError, match="between 1970 and 2098"):
+        changes.save_cutoff(conn, "1000", "2099-01-01T00:00")
+    with pytest.raises(changes.CutoffError, match="between 1970 and 2098"):
+        changes.save_cutoff(conn, "1000", "1900-01-01T00:00")
+    with pytest.raises(changes.CutoffError, match="Enter a date and time"):
+        changes.save_cutoff(conn, "1000", "not a date at all")
+
+
+def test_the_cutoff_field_shows_a_live_utc_clock_reminder(ev):
+    html = ev.get("/events/1000").get_data(as_text=True)
+    assert "data-utc-clock" in html and "enter in <strong>UTC</strong>" in html

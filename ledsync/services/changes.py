@@ -49,7 +49,7 @@ from . import structure
 from .changelog import (
     ChangeLogError, CloudEntry, ParsedChangeLog, SkippedRow, _path_problem, blocked_name_problem, fetch_change_log,
 )
-from .events import parse_timestamp
+from .events import MAX_YEAR, MIN_YEAR, parse_timestamp
 from .storage import StorageError
 
 log = logging.getLogger(__name__)
@@ -374,6 +374,16 @@ def validate_cutoff(text: str) -> str:
         return ""
     parsed = parse_timestamp(value)
     if parsed is None:
+        # A value that parses as a real date/time but falls outside the range this application accepts anywhere
+        # (see events.parse_timestamp) gets its own message, so "a real year, just too old/new" is never confused
+        # with "not a date at all".
+        candidate = value[:-1] + "+00:00" if value.endswith(("Z", "z")) else value
+        try:
+            year = datetime.fromisoformat(candidate).year
+        except (ValueError, OverflowError):
+            year = None
+        if year is not None and not (MIN_YEAR <= year <= MAX_YEAR):
+            raise CutoffError(f"Enter a year between {MIN_YEAR} and {MAX_YEAR}.")
         raise CutoffError("Enter a date and time (for example 2026-09-01T00:00), or leave it blank for no cut-off.")
     return parsed.astimezone(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
 

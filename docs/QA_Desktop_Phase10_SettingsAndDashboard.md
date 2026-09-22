@@ -59,9 +59,9 @@ Live check (read-only, re-runnable): `.\.venv\Scripts\python -m pytest -q --live
 
 | Total cases | Passed | Failed | Blocked | Not yet run |
 |---|---|---|---|---|
-| 34 | 15 (automated groups covering 29 new pytest cases, 1 live check against real Azure, 1 rendered-page group — all run by Claude) | 0 | 0 | 19 (manual TC-M01 – TC-M19, for the owner) |
+| 35 | 16 (automated groups covering 33 new pytest cases, 1 live check against real Azure, 1 rendered-page group — all run by Claude) | 0 | 0 | 19 (manual TC-M01 – TC-M19, for the owner) |
 
-`.\.venv\Scripts\python -m pytest -q` → **1435 passed, 14 skipped** (the skipped are the live-Azure tests, which need `--live`).
+`.\.venv\Scripts\python -m pytest -q` → **1439 passed, 14 skipped** (the skipped are the live-Azure tests, which need `--live`).
 
 ## Live validation against the real Azure account (read-only, 22/09/26)
 
@@ -84,7 +84,8 @@ Live check (read-only, re-runnable): `.\.venv\Scripts\python -m pytest -q --live
 | TC-A09 | **Startup log retention:** rows older than the setting are removed at startup (both logs), a summary row is written only when something was removed; "forever" (the default) prunes nothing | Pass |
 | TC-A10 | **Dashboard Actions:** the row offers Test Connections (posts to the existing device-mapping test-all action) and View Logs (links to the Logs page pre-filtered to that event) | Pass |
 | TC-A11 | **Schema:** the new `events.cutoff_timestamp` column is added correctly for a brand-new database (in the DDL) and for a database created before Phase 10 (idempotent `ALTER TABLE`, appended in the same position so the column-order check still passes; run twice with no error; existing data untouched) | Pass |
-| TC-A12 | Earlier phases unchanged (the brand rule test caught an accent colour used outside the primary button - fixed; all earlier tests pass) | Pass |
+| TC-A12 | **Independent-review regression tests (4):** two concurrent runs with different retry settings never see or leave behind each other's value, proven on real threads; `_run_job` passes the saved retry setting down as a plain argument and never touches the `transfer` module's constants; an out-of-range cut-off year (e.g. 2099) gets its own clear message instead of the generic "not a date" one; the cut-off field's live UTC clock reminder is present on the page | Pass |
+| TC-A13 | Earlier phases unchanged (the brand rule test caught an accent colour used outside the primary button - fixed; all earlier tests pass) | Pass |
 
 ## Rendered-page checks
 
@@ -105,5 +106,5 @@ Live check (read-only, re-runnable): `.\.venv\Scripts\python -m pytest -q --live
 
 | Role | Name | Date | Outcome |
 |---|---|---|---|
-| Independent Solution Architect review | Independent review agent (fresh context) | pending | pending |
+| Independent Solution Architect review | Independent review agent (fresh context) | 22/09/26 | **Approved with notes after a fix** - one "fix now" finding, reproduced and fixed: the shared retry-count/delay setting was applied by temporarily **mutating the `transfer` module's constants** around each background job; two jobs for different events running at the same time (their own daemon threads; only same-event jobs are blocked) could observe or permanently leave behind each other's value. Fixed by removing the mutable global entirely - the saved setting is now loaded once per job and passed down as an ordinary argument through every engine (`transfer.run`, `assets.process`, `rpi.process`, `sync.process`), so there is nothing left for a second thread to race with. Also fixed on the reviewer's note: an out-of-range cut-off year gave the same message as garbled input; the cut-off field's UTC framing relied on label text alone with no visual cue, now backed by a live UTC clock next to the box. 4 regression tests, including a genuine two-thread race reproduction; **not re-reviewed**. Verified sound: the schema upgrade path (simulated a real pre-Phase-10 table, no data loss), the cut-off decision logic's full truth table, `add_azure_files`'s cut-off interaction, every new validator's server-side bounds, CSRF/auth on every new route, the Dashboard's Test Connections reuse of the existing guarded mapping route, and startup log pruning's timing and boundary. |
 | User (Vatsan) go-ahead | Vatsan | pending | pending |

@@ -54,7 +54,7 @@ def asset_items(comparison: changes.Comparison, event_dir=None, budget: float | 
 
 
 def process(conn, storage, account: str, location: EventLocation, event_id: str, comparison: changes.Comparison,
-            asset_root, data_dir, progress=None) -> transfer.TransferResult:
+            asset_root, data_dir, progress=None, *, retries=None, delay=None) -> transfer.TransferResult:
     """Carry out the asset downloads and removals of `comparison`. Raises `localfiles.LocalFileError` only if the asset
     folder itself cannot be used; problems with single files are counted."""
     progress = progress or NullProgress()
@@ -74,4 +74,4 @@ def process(conn, storage, account: str, location: EventLocation, event_id: str,
                         folder_for=lambda item: localfiles.open_subfolder(event_dir, f"Table {item.table}",
                                                                           structure.LED_LABELS[item.led_type]),
                         existing_folder_for=existing, table_led_of=lambda item: (item.table, item.led_type),
-                        progress=progress, listings={})
+                        progress=progress, listings={}, retries=retries, delay=delay)

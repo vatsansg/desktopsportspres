@@ -162,9 +162,14 @@ def _resolve(conn, event_id, item: SyncItem) -> None:
                                 file_name=item.file_name, destination=item.mapping.shared_folder)
 
 
-def _retry(action):
-    """`transfer.RETRY_COUNT` more tries, each after `transfer.RETRY_DELAY` seconds, for a transient network problem
-    or a copy that did not verify (the same Settings -> Download configuration governs both download and push)."""
+def _retry(action, retries: int | None = None, delay: float | None = None):
+    """`retries` more tries, each after `delay` seconds, for a transient network problem or a copy that did not
+    verify. `None` (the default) falls back to `transfer.RETRY_COUNT` / `transfer.RETRY_DELAY`, read fresh on every
+    call (so a test's monkeypatch still works); a real run passes its own Settings -> Download values explicitly
+    instead (see `downloads.py`) - the same configuration governs both download and push, but as an ordinary
+    parameter, never a shared mutable global two concurrent jobs (different events) could step on."""
+    retries = transfer.RETRY_COUNT if retries is None else retries
+    delay = transfer.RETRY_DELAY if delay is None else delay
     attempt = 0
     while True:
         try:
@@ -173,15 +178,16 @@ def _retry(action):
             if isinstance(err, localfiles.DeviceError) and err.category != exceptions.NETWORK_DEVICE:
                 raise
             attempt += 1
-            if attempt > transfer.RETRY_COUNT:
+            if attempt > retries:
                 raise
-            time.sleep(transfer.RETRY_DELAY)
+            time.sleep(delay)
 
 
 def process(conn: sqlite3.Connection, event_id: str, items: list[SyncItem], data_dir, progress=None, checker=None,
-            protected=()) -> SyncResult:
+            protected=(), retries: int | None = None, delay: float | None = None) -> SyncResult:
     """Carry out `items`. Every destination is tested first; a destination that cannot be used fails only its own files.
-    `protected` are folders no device folder may overlap (the local asset and RPI folders)."""
+    `protected` are folders no device folder may overlap (the local asset and RPI folders). `retries` / `delay`: see
+    `_retry`."""
     progress = progress or NullProgress()
     result = SyncResult()
     if not items:
@@ -231,7 +237,8 @@ def process(conn: sqlite3.Connection, event_id: str, items: list[SyncItem], data
                     size = item.source.stat().st_size if item.source is not None and item.source.is_file() else 0
                     progress.begin(item.file_name, size)
                     target = _retry(lambda: localfiles.push_file(
-                        item.source, folder, item.file_name, on_bytes=progress.add_bytes, cancelled=lambda: progress.cancelled))
+                        item.source, folder, item.file_name, on_bytes=progress.add_bytes, cancelled=lambda: progress.cancelled),
+                        retries, delay)
                     _record(conn, event_id, item, "Success")
                     oplog.add(conn, OPERATION, "Success", f"{item.mapping.label}: sent {item.file_name}.", event_id)
                     _resolve(conn, event_id, item)

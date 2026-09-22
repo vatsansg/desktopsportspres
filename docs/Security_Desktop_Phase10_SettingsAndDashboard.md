@@ -35,7 +35,7 @@ Status values: **Pass**, **Fail**, **N/A at this stage**, **Accepted risk** (BRD
 | D2 | **Key-shaped text pasted into the wrong box is refused** | **Pass** | The email recipient field refuses a key-shaped value, same as the account/container fields (tested). |
 | D3 | **The schema change cannot lose data** | **Pass** | `events.cutoff_timestamp` is added by an idempotent `ALTER TABLE ... ADD COLUMN` for a database created before Phase 10, in the same column position a fresh database's DDL uses, so the startup column-order check passes either way; run twice with no error; an existing row's other columns are untouched (tested by simulating a real pre-Phase-10 table). |
 | D4 | **The per-event cut-off cannot affect another event** | **Pass** | Stored on the event's own row and looked up by that event's ID (case-insensitive, like every other event lookup); tested with two events sharing similar data. |
-| D5 | **The shared retry setting cannot leak between runs** | **Pass** | `transfer.RETRY_COUNT` / `RETRY_DELAY` are read fresh at the start of every job and restored to their previous values in a `finally` block once the job ends, including when the job raises. Only one job runs per event, and a second start for the same event is refused (Phase 8); the application has one administrator and no concurrent-job-with-different-settings scenario is possible through the UI. |
+| D5 | **The shared retry setting cannot leak between runs** | **Pass (after a review fix)** | The saved setting is loaded once per job and passed down as an **ordinary argument** through every engine (`transfer.run`, `assets.process`, `rpi.process`, `sync.process`) - not a shared mutable global. An earlier version mutated `transfer.RETRY_COUNT` / `RETRY_DELAY` around each job and restored them afterwards; because only *same-event* jobs are blocked from running together (Phase 8), two jobs for **different** events on their own threads could observe or permanently corrupt each other's value - reproduced on real threads by the review (S-62 promoted to a real finding and closed; see below). With no global left to mutate, the race is structurally impossible, not just unlikely. |
 | D6 | The read-only Application Settings page does not disclose anything beyond a local path | **Pass** | Shows only this computer's own database and log file paths, already implied by the application's own presence on the machine; no environment variable content, no other machine's information. |
 
 ## E. Application security
@@ -45,7 +45,7 @@ Status values: **Pass**, **Fail**, **N/A at this stage**, **Accepted risk** (BRD
 | E1 | Input validation / injection | **Pass** | All new settings values are parameterised in SQL, range/format-checked server-side (not relying on the HTML `min`/`max`/`maxlength` attributes, which a forged request bypasses - tested); the schedule day list is filtered to the fixed seven-value set, dropping anything forged. |
 | E2 | Output encoding / XSS | **Pass** | Jinja auto-escaping for every new field. |
 | E5 | Errors do not leak internals | **Pass** | Fixed plain messages; a refused save is a 400 with the same message shown to the operator and logged (scrubbed) as an exception. |
-| E12 | Background job safety | **Pass** | The retry-settings mutation happens on the job's own thread before any file is touched, and is restored after, whether the job finishes normally, is cancelled, or raises. |
+| E12 | Background job safety | **Pass (after a review fix)** | The retry setting is loaded once at the start of the job and passed down as a plain argument (see D5) - nothing shared is mutated, so there is nothing to restore and nothing a concurrent job could see mid-flight. |
 | E15 (added) | **The Dashboard's Test Connections reuses an existing, already-guarded route** | **Pass** | Posts `action=test-all` to the same `/events/<id>/mappings` endpoint Device Mapping's own "SAVE AND TEST ALL" uses; that endpoint only reads per-LED fields that are present in the POST body (`_entries`), so a Dashboard form that omits them changes nothing about the saved folders - it only runs the test, exactly like the existing button does. |
 
 ## F. Secrets management
@@ -74,12 +74,14 @@ Status values: **Pass**, **Fail**, **N/A at this stage**, **Accepted risk** (BRD
 
 | ID | Severity | Finding | Action |
 |---|---|---|---|
-| S-62 | Info | The retry setting is a single mutable pair of module-level constants, restored per job rather than threaded as a parameter. Safe under this application's one-job-at-a-time model, but would need rework if a future phase ran two jobs concurrently with different settings. | Accepted; documented in the code. |
+| S-62 | **Medium → Closed** | (Review) The retry setting was a mutable pair of module-level constants (`transfer.RETRY_COUNT`/`RETRY_DELAY`), mutated and restored around each job. Two jobs for **different** events run concurrently (Phase 8 only blocks a second job for the *same* event); the reviewer reproduced both cross-contamination (one job briefly observing another's in-flight value) and a permanent leak (the wrong "old" value winning the restore race) with a standalone repro. | Removed the global entirely: `retries`/`delay` are now ordinary parameters threaded through `transfer.run` / `assets.process` / `rpi.process` / `sync.process` / `_retry`, loaded once per job in `downloads._run_job`. Two threads with different values, run concurrently, now provably never see or leave behind each other's setting (new regression test). |
+| S-63 | Low → **Closed** | (Review) An out-of-range cut-off year (e.g. 2099, outside the application's accepted 1970-2098) gave the same message as a genuinely unreadable value, which could read as "try again" rather than "pick an in-range year". | A year outside the accepted range now gets its own message. |
+| S-64 | Info → **Closed** | (Review note) The cut-off field's UTC framing relied entirely on label/hint text; the native `datetime-local` picker shows no time-zone indicator, a plausible real-world source of a local-time mistake. | A live UTC clock next to the field now shows "this computer's current UTC time", refreshed every 30 s, via the existing CSP-safe `app.js` (no inline script). |
 | S-2, S-4, S-9 | — | Accepted admin credential; accepted plain-text key (F-28); single-instance lock (Phase 12). | Carried. |
 
 ## Sign-off
 
 | Role | Name | Date | Outcome |
 |---|---|---|---|
-| Independent Solution Architect review | Independent review agent (fresh context) | pending | pending |
+| Independent Solution Architect review | Independent review agent (fresh context) | 22/09/26 | **Approved with notes after a fix** - see S-62, S-63, S-64 (S-62 reproduced on real threads and fixed by removing the mutable global; 4 regression tests; **not re-reviewed**). |
 | User (Vatsan) go-ahead | Vatsan | pending | pending |
