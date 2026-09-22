@@ -61,7 +61,7 @@ Live checks (read-only, re-runnable): `.\.venv\Scripts\python -m pytest -q --liv
 
 | Total cases | Passed | Failed | Blocked | Not yet run |
 |---|---|---|---|---|
-| 43 | 28 (automated groups covering about 60 new pytest cases, 2 live checks against real Azure, 1 rendered-page group — all run by Claude) | 0 | 0 | 15 (manual TC-M01 – TC-M15, for the owner) |
+| 43 | 43 (automated groups covering about 60 new pytest cases, 2 live checks against real Azure, 1 rendered-page group — all run by Claude; 15 manual TC-M01 – TC-M15 run by the owner on 22/09/26: "tested, all ok") | 0 | 0 | 0 |
 
 `.\.venv\Scripts\python -m pytest -q` → **1375 passed, 13 skipped** (the skipped are the live-Azure tests, which need `--live`); `--live` → all live tests pass against real Azure (read-only).
 
@@ -112,4 +112,4 @@ Live checks (read-only, re-runnable): `.\.venv\Scripts\python -m pytest -q --liv
 | Role | Name | Date | Outcome |
 |---|---|---|---|
 | Independent Solution Architect review | Independent review agent (fresh context) | 21/09/26 | **Approved with notes after fixes** — one blocker and seven "fix now" findings, all reproduced by running code and all fixed: **a device folder overlapping another LED's local asset folder let a push overwrite the downloaded originals and a cloud removal then delete them** (device folders may not overlap the asset or RPI folders any more, at save and at push time); a device check that timed out aborted the whole run instead of failing only that device; a failed removal was never retried and left the status stuck; the status could never clear after a folder change; a stalled copy froze the run (now watched, 60 s); a removal from a folder shared with another mapping (or event) is refused; the event showed Synced while an LED had files but no folder (and RPI-only downloads counted); the Operation Status re-announced every second and a button's accessible name did not contain its visible text. 11 regression tests added; **the fixes were not re-reviewed** (verified by the suite and the live real-event run, re-run after the fixes: 76 downloaded, 75 pushed, 0 failed). |
-| User (Vatsan) go-ahead | Vatsan | pending | pending |
+| User (Vatsan) go-ahead | Vatsan | 22/09/26 | Approved — "tested, all ok, complete remaining work for this step, commit to github, then move to next step" |

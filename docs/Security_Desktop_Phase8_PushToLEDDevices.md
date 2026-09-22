@@ -90,4 +90,4 @@ Status values: **Pass**, **Fail**, **N/A at this stage**, **Accepted risk** (BRD
 | Role | Name | Date | Outcome |
 |---|---|---|---|
 | Independent Solution Architect review | Independent review agent (fresh context) | 21/09/26 | **Approved with notes after fixes** — see S-52, S-55, S-56 (all reproduced by running code and fixed; 11 regression tests; **not re-reviewed**). |
-| User (Vatsan) go-ahead | Vatsan | pending | pending |
+| User (Vatsan) go-ahead | Vatsan | 22/09/26 | Approved after the manual test. |

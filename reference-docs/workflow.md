@@ -180,9 +180,9 @@ Status values: `Not started` / `In progress` / `Awaiting user go-ahead` / `Compl
   5. Carried: QA F-51 (an Azure-only file overwritten without a log entry is not re-downloaded), F-52 (no overall time limit on a stalled network write; `Content-Encoding` blobs unverified), F-53 (summary shown once), F-54, **F-55 (nothing is pushed to LED yet — Phase 8)**.
 
 ## Phase 8 - Push / Synchronise to LED Devices
-- **Status:** Built, reviewed and validated; **awaiting the owner's go-ahead** (manual steps TC-M01 - TC-M15 in the QA doc not yet run by the owner)
+- **Status:** Complete (owner's manual test passed - "tested, all ok" - and go-ahead given 22 September 2026; built, independently reviewed and validated against the whole real event on 21 September; merged to `main` and pushed - hashes in the table below)
 - **Includes:** Step 8.1 push downloaded files to the mapped shared folders, Step 8.2 the end-to-end **Download & Sync** from the Dashboard with Operation Status, automatic event status, Sync Status in the local change log.
-- **Completed on:** 21 September 2026 (build); merge pending go-ahead
+- **Completed on:** 22 September 2026
 - **What was built:**
   - `services/sync.py`: `plan()` (database only) decides what to push or remove; `process()` tests every device first, copies each file, records `sync_history` (destination = full device path), audit and exception rows; one bad device fails only its own files (a network failure leaves the rest of that device untried); one retry per file.
   - `localfiles.push_file`: copy to a hidden temporary name on the device, fsync, **read back size + MD5**, then move over the name; a same-named file is replaced; the device folder is never created; watched copy (no progress for 60 s = network failure, abandoned copy tidies itself). `check_destination`: identity-based refusal of the data folder, its parents, OS folders, drive roots and, after review, **the local asset and RPI folders**.
@@ -191,7 +191,7 @@ Status values: `Not started` / `In progress` / `Awaiting user go-ahead` / `Compl
   - `services/downloads.run_job`: fresh check, download, then push (a stopped or cancelled download does not start the push); `views_sync.py` routes (Download & Sync, push only, cancel, `/operations/progress`); Dashboard **Actions** column and **Operation Status** (counters Identified / Downloaded / Synchronised / Errors, bar, Cancel); Change Log page **Sync To LED Devices (N)**; `_localchangelog.csv` Sync Status filled.
   - **Validated against the real account (read-only):** the whole real Event 1000 through the Dashboard: **76 downloaded, 75 pushed to four scratch device folders, 0 failed, status Synced, about 85 s**; a real selection compared with Azure's size and MD5 on the devices. Re-run after the review fixes.
   - 1375 automated tests pass plus the live tests.
-- **QA Test Case doc:** `docs/QA_Desktop_Phase8_PushToLEDDevices.md` - 43 cases: 28 passed (automated, 2 live, 1 rendered-page), 15 manual (TC-M01 - TC-M15) for the owner; includes the step-by-step real-app guide.
+- **QA Test Case doc:** `docs/QA_Desktop_Phase8_PushToLEDDevices.md` - 43 cases: 28 passed (automated, 2 live, 1 rendered-page), 15 manual (TC-M01 - TC-M15) run by the owner: "tested, all ok"; includes the step-by-step real-app guide.
 - **Security Checklist:** `docs/Security_Desktop_Phase8_PushToLEDDevices.md`
 - **Independent architect review:** **Approved with notes after fixes** - one blocker and seven fix-now findings reproduced and fixed (device folder overlapping the local asset folder could let a push overwrite and a removal delete the downloaded originals; a device-check timeout aborted the whole run; a failed removal never retried and stuck the status; status could not clear after a folder change; a stalled copy froze the run; removals from a shared folder; Synced with an unmapped LED; Operation Status accessibility). 11 regression tests; **not re-reviewed**.
 - **`ralph-loop` / `wtt-brand`:** applied to the new Dashboard sections (one orange action per screen; bordered controls; polite live region on the status line only).
