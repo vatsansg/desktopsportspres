@@ -38,6 +38,21 @@ def hermetic_environment(monkeypatch, tmp_path_factory):
         monkeypatch.delenv(name, raising=False)
 
 
+@pytest.fixture(autouse=True)
+def no_real_schtasks(monkeypatch):
+    """No test may shell out to the real Windows Task Scheduler. A safety-net default (always
+    "not registered", never actually invoked) for any test that incidentally touches Settings ->
+    Scheduling without caring about scheduler.py itself; tests/test_phase12_scheduled.py passes its
+    own explicit fake runner wherever the real behaviour matters."""
+    from ledsync.services import scheduler
+
+    class _NeverCalled:
+        returncode = 1
+        stdout = stderr = ""
+
+    monkeypatch.setattr(scheduler, "_DEFAULT_RUNNER", lambda *a, **kw: _NeverCalled())
+
+
 @pytest.fixture
 def cfg(tmp_path) -> Config:
     return Config(data_dir=tmp_path)

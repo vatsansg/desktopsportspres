@@ -38,7 +38,7 @@
       <p id="sender-hint" class="hint">A verified sender address/domain on the Azure Communication Services resource below.</p>
     </div>
     {{ password_field("connection_string", "connection_string", "Azure Communication Services connection string", autocomplete="off",
-                      required=False,
+                      required=False, maxlength=2000,
                       hint=("Saved. Leave blank to keep it; paste a new one to replace it. It is never shown again."
                             if saved.has_connection else
                             "Not set yet. Paste the connection string once it is supplied (BRD Addendum A §39.3)."),

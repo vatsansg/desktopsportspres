@@ -1,10 +1,12 @@
-"""Settings routes (BRD Section 14): Cloud Storage and Local Folders (Phase 4/6/7), Download, Scheduling, Email and
-Application (Phase 10)."""
+"""Settings routes (BRD Section 14): Cloud Storage and Local Folders (Phase 4/6/7), Download, Scheduling (Phase 12
+runs it), Email and Application (Phase 10)."""
+
+import getpass
 
 from flask import Blueprint, current_app, flash, redirect, render_template, request, session, url_for
 
-from .. import APP_NAME, __version__
-from ..services import exceptions, oplog, settings as cs
+from .. import APP_NAME, __version__, config as app_config
+from ..services import exceptions, oplog, scheduler, settings as cs
 from ..services.storage import StorageError
 from .app_db import get_db
 from .security import login_required
@@ -164,14 +166,18 @@ def download_post():
     return redirect(url_for("settings.download"))
 
 
-# --- Scheduling Settings (BRD 14/22; storage only - Phase 12 runs the schedule) -------------------------------------
+# --- Scheduling Settings (BRD 14/22; Phase 12 runs the schedule, with nobody needing to be logged in - -------------
+# Addendum A 39.6, confirmed 23 Sep 2026) ------------------------------------------------------------------------
 
-def _scheduling_page(db, enabled=None, days=None, time_typed=None, error=None):
+def _scheduling_page(db, enabled=None, days=None, time_typed=None, username_typed=None, error=None):
     saved = cs.load_schedule(db)
+    default_username = saved.username or getpass.getuser()
     return render_template("settings_scheduling.html", **_ctx(
         saved=saved, day_choices=cs.SCHEDULE_DAYS, enabled=(saved.enabled if enabled is None else enabled),
         days=(list(saved.days) if days is None else days),
-        time_typed=(saved.time if time_typed is None else time_typed), error=error))
+        time_typed=(saved.time if time_typed is None else time_typed),
+        username_typed=(default_username if username_typed is None else username_typed),
+        registered=scheduler.is_registered(), error=error))
 
 
 @bp.get("/scheduling")
@@ -187,11 +193,58 @@ def scheduling_post():
     enabled = request.form.get("enabled") == "1"
     days = request.form.getlist("days")
     time_typed = request.form.get("time", "")[:10]
+    username_typed = request.form.get("username", "")[:200]
+    password = request.form.get("password", "")
+
+    def refused(message: str):
+        exceptions.record_rejection(db, "Settings Changed", "Save Scheduling Settings", message)
+        return _scheduling_page(db, enabled, days, time_typed, username_typed, message), 400
+
     try:
-        changed = cs.save_schedule(db, enabled, days, time_typed)
+        days_value = cs.validate_schedule_days(days)
+        time_value = cs.validate_schedule_time(time_typed)
+        username_value = cs.validate_schedule_username(username_typed)
     except cs.SettingsError as err:
-        exceptions.record_rejection(db, "Settings Changed", "Save Scheduling Settings", str(err))
-        return _scheduling_page(db, enabled, days, time_typed, str(err)), 400
+        return refused(str(err))
+    if enabled and (not days_value or not time_value):
+        return refused("Choose at least one day and a time before enabling the schedule.")
+    if enabled and not username_value:
+        return refused("Enter the Windows account to run the schedule as before turning it on.")
+    if enabled and not password:
+        return refused("Enter the Windows account password before turning the schedule on. It is used once, "
+                       "to register the task with Windows, and is never stored by this application.")
+
+    # The real Task Scheduler entry is registered/removed BEFORE the settings are saved: a bad account
+    # or password must refuse the whole save, exactly like every other validation failure in this
+    # application - never leave the saved settings claiming "enabled" when Windows disagrees. (Review
+    # fix: this applied to register() but not unregister() - both are now guarded the same way.)
+    cfg = current_app.config["LEDSYNC"]
+    if enabled:
+        try:
+            scheduler.register(username_value, password, tuple(days_value.split(",")), time_value,
+                               app_config.PROJECT_ROOT, cfg.data_dir)
+        except scheduler.SchedulerError as err:
+            return refused(str(err))
+    else:
+        try:
+            scheduler.unregister()
+        except scheduler.SchedulerError as err:
+            return refused(str(err))
+
+    try:
+        changed = cs.save_schedule(db, enabled, days, time_typed, username_typed)
+    except cs.SettingsError as err:
+        # Review fix: the Task Scheduler side already changed (registered/removed) above, but the
+        # database write itself just failed - a genuine SQLite error, not a validation problem. Best
+        # effort to put the real Task Scheduler state back the way it was before this request, so the
+        # two never disagree; this can only fail if Task Scheduler itself is now also unreachable, in
+        # which case the operator already sees a clear error either way.
+        if enabled:
+            try:
+                scheduler.unregister()
+            except scheduler.SchedulerError:
+                pass
+        return refused(str(err))
     flash("Scheduling settings saved." if changed else "Nothing changed \u2014 the settings were already saved.",
           "success" if changed else "info")
     return redirect(url_for("settings.scheduling"))

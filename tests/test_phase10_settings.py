@@ -63,20 +63,22 @@ def test_log_retention_default_is_forever(cfg):
 def test_scheduling_settings_validate_order_and_refuse_enabling_without_day_or_time(cfg):
     init_db(cfg.db_path)
     conn = connect(cfg.db_path)
-    assert cs.load_schedule(conn) == cs.ScheduleSettings(False, (), "")
+    assert cs.load_schedule(conn) == cs.ScheduleSettings(False, (), "", "")
     with pytest.raises(cs.SettingsError):
-        cs.save_schedule(conn, True, ["Mon"], "")
+        cs.save_schedule(conn, True, ["Mon"], "", "op")
     with pytest.raises(cs.SettingsError):
-        cs.save_schedule(conn, True, [], "02:30")
-    changed = cs.save_schedule(conn, True, ["Fri", "Mon", "Mon", "Xyz"], "02:30")     # forged/duplicate days dropped
-    assert changed == ["enabled", "days", "time"]
+        cs.save_schedule(conn, True, [], "02:30", "op")
+    with pytest.raises(cs.SettingsError):
+        cs.save_schedule(conn, True, ["Mon"], "02:30", "")                           # Phase 12: needs an account too
+    changed = cs.save_schedule(conn, True, ["Fri", "Mon", "Mon", "Xyz"], "02:30", "op")  # forged/duplicate days dropped
+    assert changed == ["enabled", "days", "time", "account"]
     saved = cs.load_schedule(conn)
-    assert saved == cs.ScheduleSettings(True, ("Mon", "Fri"), "02:30")               # week order, not input order
+    assert saved == cs.ScheduleSettings(True, ("Mon", "Fri"), "02:30", "op")          # week order, not input order
     with pytest.raises(cs.SettingsError):
-        cs.save_schedule(conn, True, ["Mon"], "25:00")
+        cs.save_schedule(conn, True, ["Mon"], "25:00", "op")
     with pytest.raises(cs.SettingsError):
-        cs.save_schedule(conn, True, ["Mon"], "9:30")
-    assert cs.save_schedule(conn, True, ["Mon", "Fri"], "02:30") == []               # no change
+        cs.save_schedule(conn, True, ["Mon"], "9:30", "op")
+    assert cs.save_schedule(conn, True, ["Mon", "Fri"], "02:30", "op") == []          # no change
     conn.close()
 
 
@@ -193,16 +195,23 @@ def test_download_settings_page_saves_and_shows_errors(logged_in):
     assert bad.status_code == 400 and "retries" in text_of(bad.get_data(as_text=True))
 
 
-def test_scheduling_settings_page_saves_days_and_shows_errors(logged_in):
-    out = text_of(logged_in.post("/settings/scheduling", data={"csrf_token": tok2(logged_in, "/settings/scheduling"),
-                                                                "enabled": "1", "days": ["Mon", "Wed"], "time": "03:15"},
-                                 follow_redirects=True).get_data(as_text=True))
-    assert "Scheduling settings saved." in out
-    html = logged_in.get("/settings/scheduling").get_data(as_text=True)
-    assert 'name="days" value="Mon" checked' in html and 'name="days" value="Wed" checked' in html
-    assert 'name="days" value="Tue" checked' not in html and 'value="03:15"' in html
+def test_scheduling_settings_page_shows_errors_for_a_disabled_save(logged_in):
+    """The enable-a-schedule case (which now also registers a real Windows Task Scheduler entry) is
+    covered in tests/test_phase12_scheduled.py, with the real schtasks call replaced by a fake."""
     bad = logged_in.post("/settings/scheduling", data={"csrf_token": tok2(logged_in, "/settings/scheduling"), "enabled": "1"})
     assert bad.status_code == 400
+    html = logged_in.get("/settings/scheduling").get_data(as_text=True)
+    assert "Not registered" in html
+
+
+def test_the_connection_string_field_is_not_truncated_before_a_real_connection_string_fits(logged_in):
+    """Found live (Phase 12): the field's maxlength defaulted to 128 (sized for the Cloud Storage
+    access key alone), silently truncating a real 'endpoint=...;accesskey=...' connection string
+    (170+ characters) in the browser before it ever reached the server - every save looked
+    successful in the UI but the saved key was cut off mid-string and could never actually be used."""
+    html = logged_in.get("/settings/email").get_data(as_text=True)
+    assert 'id="connection_string"' in html
+    assert 'maxlength="2000"' in html
 
 
 def test_email_settings_page_saves_and_never_echoes_the_connection_string(logged_in):

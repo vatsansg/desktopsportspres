@@ -13,7 +13,7 @@ from datetime import datetime, timedelta, timezone
 
 from . import APP_NAME, __version__, config, logging_setup, platform_checks
 from .db import connect, init_db
-from .services import auth, exceptions, oplog
+from .services import auth, exceptions, oplog, singleinstance
 from .services import settings as cloud_settings
 from .web import create_app, start_server
 
@@ -72,6 +72,18 @@ def _run(args: argparse.Namespace) -> None:
     if platform_checks.webview2_version() is None:
         raise StartupError(WEBVIEW2_HELP)
 
+    # Held for as long as the window stays open, so a scheduled run (Phase 12) can never start while
+    # this interactive session is using the same data folder, and vice versa.
+    try:
+        with singleinstance.instance_lock(cfg.data_dir):
+            _run_ui(cfg, args)
+    except singleinstance.AlreadyRunning as exc:
+        raise StartupError(
+            "The application is already open, or a scheduled run is in progress, for this data "
+            f"folder.\n\n{exc}") from None
+
+
+def _run_ui(cfg: config.Config, args: argparse.Namespace) -> None:
     init_db(cfg.db_path)
     _seed_and_log_startup(cfg)
 

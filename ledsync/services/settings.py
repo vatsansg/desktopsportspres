@@ -484,11 +484,20 @@ def save_log_retention(conn: sqlite3.Connection, text: str) -> bool:
     return changed
 
 
-# --- scheduling settings (BRD 14/22; storage only - Phase 12 runs the schedule) ------------------------------------
+# --- scheduling settings (BRD 14/22; Phase 12 runs the schedule) -----------------------------------------------------
+#
+# DEVIATION (23 Sep 2026, Phase 12): Addendum A 39.6 confirmed the schedule must work with nobody
+# logged into Windows, which means Windows Task Scheduler needs a real account to run as (see
+# services/scheduler.py). The account NAME is stored here (not sensitive - just which Windows account
+# the Task is registered to run as, shown back on the page); the account PASSWORD is never stored
+# anywhere by this application - see scheduler.py's own docstring - so it is deliberately NOT a field
+# on ScheduleSettings/save_schedule at all. The Settings -> Scheduling view collects it directly from
+# the form and passes it straight to scheduler.register(), never through this module.
 
 KEY_SCHEDULE_ENABLED = "schedule_enabled"
 KEY_SCHEDULE_DAYS = "schedule_days"
 KEY_SCHEDULE_TIME = "schedule_time"
+KEY_SCHEDULE_USERNAME = "schedule_username"
 SCHEDULE_DAYS = ("Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun")
 _TIME_RE = re.compile(r"^([01]\d|2[0-3]):([0-5]\d)$")
 
@@ -497,13 +506,15 @@ _TIME_RE = re.compile(r"^([01]\d|2[0-3]):([0-5]\d)$")
 class ScheduleSettings:
     enabled: bool
     days: tuple                # a subset of SCHEDULE_DAYS, in week order
-    time: str                  # "" or "HH:MM" (24-hour)
+    time: str                  # "" or "HH:MM" (24-hour, this computer's LOCAL time - Task Scheduler's own clock)
+    username: str              # "" or "DOMAIN\\user" - the Windows account the Task Scheduler entry runs as
 
 
 def load_schedule(conn: sqlite3.Connection) -> ScheduleSettings:
     raw_days = _get(conn, KEY_SCHEDULE_DAYS)
     days = tuple(d for d in SCHEDULE_DAYS if d in raw_days.split(",")) if raw_days else ()
-    return ScheduleSettings(_get(conn, KEY_SCHEDULE_ENABLED) == "1", days, _get(conn, KEY_SCHEDULE_TIME))
+    return ScheduleSettings(_get(conn, KEY_SCHEDULE_ENABLED) == "1", days, _get(conn, KEY_SCHEDULE_TIME),
+                            _get(conn, KEY_SCHEDULE_USERNAME))
 
 
 def validate_schedule_time(text: str) -> str:
@@ -515,14 +526,29 @@ def validate_schedule_time(text: str) -> str:
     return value
 
 
-def _validate_schedule_days(values) -> str:
+def validate_schedule_username(text: str) -> str:
+    value = (text or "").strip()
+    if not value:
+        return ""
+    if looks_like_secret(value) or len(value) > 200 or "\n" in value:
+        raise SettingsError("Enter a valid Windows account name (for example DOMAIN\\user), or leave it blank.")
+    return value
+
+
+def validate_schedule_days(values) -> str:
     return ",".join(d for d in SCHEDULE_DAYS if d in (values or ()))    # fixed order; anything else forged is dropped
 
 
-def save_schedule(conn: sqlite3.Connection, enabled: bool, days, time_text: str) -> list[str]:
-    days_value, time_value = _validate_schedule_days(days), validate_schedule_time(time_text)
+def save_schedule(conn: sqlite3.Connection, enabled: bool, days, time_text: str, username_text: str = "") -> list[str]:
+    """Storage only - never touches the real Task Scheduler entry (services/scheduler.py does that;
+    the view calls scheduler.register()/unregister() BEFORE this, since a bad account/password must
+    refuse the save entirely, and this function never sees the password at all)."""
+    days_value, time_value = validate_schedule_days(days), validate_schedule_time(time_text)
+    username = validate_schedule_username(username_text)
     if enabled and (not days_value or not time_value):
         raise SettingsError("Choose at least one day and a time before enabling the schedule.")
+    if enabled and not username:
+        raise SettingsError("Enter the Windows account to run the schedule as before turning it on.")
     enabled_value = "1" if enabled else "0"
     changed = []
     try:
@@ -535,6 +561,9 @@ def save_schedule(conn: sqlite3.Connection, enabled: bool, days, time_text: str)
         if _get(conn, KEY_SCHEDULE_TIME) != time_value:
             _put(conn, KEY_SCHEDULE_TIME, time_value)
             changed.append("time")
+        if _get(conn, KEY_SCHEDULE_USERNAME) != username:
+            _put(conn, KEY_SCHEDULE_USERNAME, username)
+            changed.append("account")
         oplog.add(conn, "Settings Changed", "Success",
                   f"Scheduling settings saved ({', '.join(changed)} changed)." if changed else "Scheduling settings saved (no change).")
         conn.commit()
@@ -630,11 +659,31 @@ def validate_email_sender(text: str) -> str:
 
 
 def validate_email_connection(text: str) -> str:
+    """Beyond a length check, actually parses 'endpoint=...;accesskey=...' (order/case insensitive,
+    like every Azure connection string - mirrors email_notify._parse_connection_string, kept as a
+    separate small implementation here rather than imported, to avoid a settings.py <-> email_notify.py
+    circular import) and confirms the access key is valid base64. A connection string with a
+    mis-copied key (most commonly: trailing '=' padding dropped) used to be accepted here and only
+    fail, cryptically, the next time a notification was actually sent (found live, Phase 12)."""
     value = (text or "").strip()
     if not value:
         return ""
     if not (_CONNECTION_LENGTH[0] <= len(value) <= _CONNECTION_LENGTH[1]):
         raise SettingsError("That does not look like an Azure Communication Services connection string.")
+    parts = {}
+    for piece in value.split(";"):
+        if "=" in piece:
+            key, _, val = piece.partition("=")
+            parts[key.strip().lower()] = val.strip()
+    endpoint, access_key = parts.get("endpoint", "").rstrip("/"), parts.get("accesskey", "")
+    if not (endpoint.startswith("https://") and access_key):
+        raise SettingsError("That does not look like an Azure Communication Services connection string "
+                            "(expected 'endpoint=https://...;accesskey=...').")
+    try:
+        base64.b64decode(access_key, validate=True)
+    except (binascii.Error, ValueError):
+        raise SettingsError("The connection string's access key is not valid - check it was copied in full, "
+                            "including any trailing '=' characters.") from None
     return value
 
 
@@ -678,6 +727,6 @@ def save_email(conn: sqlite3.Connection, enabled: bool, recipient_text: str, sen
 # Appended here, after every KEY_* constant above is defined.
 OWNED_KEYS = OWNED_KEYS | {
     KEY_RETRY_COUNT, KEY_RETRY_DELAY, KEY_LOG_RETENTION,
-    KEY_SCHEDULE_ENABLED, KEY_SCHEDULE_DAYS, KEY_SCHEDULE_TIME,
+    KEY_SCHEDULE_ENABLED, KEY_SCHEDULE_DAYS, KEY_SCHEDULE_TIME, KEY_SCHEDULE_USERNAME,
     KEY_EMAIL_ENABLED, KEY_EMAIL_RECIPIENT, KEY_EMAIL_SENDER, KEY_EMAIL_CONNECTION,
 }
