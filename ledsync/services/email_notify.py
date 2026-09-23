@@ -71,7 +71,9 @@ def _map_error(exc: Exception) -> NotifyError:
         return NotifyError("Azure Communication Services refused the connection string.")
     if isinstance(exc, HttpResponseError):
         return NotifyError(f"Azure Communication Services returned an error (status {getattr(exc, 'status_code', '?')}).")
-    return NotifyError("An unexpected problem occurred sending the notification.")
+    # The exception's type name only (never its message, which for some exceptions could echo request
+    # data) - enough to diagnose from the oplog alone, without needing the diagnostic log file.
+    return NotifyError(f"An unexpected problem occurred sending the notification ({type(exc).__name__}).")
 
 
 @dataclass(frozen=True)
@@ -108,13 +110,13 @@ def _content(outcome: RunOutcome) -> tuple[str, str]:
 
 
 def _send(client, sender: str, recipients: list[str], outcome: RunOutcome) -> None:
-    subject, body = _content(outcome)
-    message = {
-        "senderAddress": sender,
-        "recipients": {"to": [{"address": address} for address in recipients]},
-        "content": {"subject": subject, "plainText": body},
-    }
     try:
+        subject, body = _content(outcome)
+        message = {
+            "senderAddress": sender,
+            "recipients": {"to": [{"address": address} for address in recipients]},
+            "content": {"subject": subject, "plainText": body},
+        }
         poller = client.begin_send(message)
         poller.result(timeout=_POLL_TIMEOUT)
     except Exception as exc:                                   # noqa: BLE001 - mapped below
@@ -139,17 +141,21 @@ def notify(conn: sqlite3.Connection, outcome: RunOutcome, *, client_factory=None
         return
     recipients = cloud_settings.split_email_recipients(creds.recipient)
     factory = client_factory or _default_client
+    error: NotifyError | None = None
     try:
         client = factory(creds.connection_string)
         _send(client, creds.sender, recipients, outcome)
     except NotifyError as err:
-        if err.connectivity:
-            oplog.record(conn, OPERATION, SKIPPED, "Notification skipped — no connectivity.", outcome.event_id)
-        else:
-            oplog.record(conn, OPERATION, FAILED, f"Notification failed: {err}", outcome.event_id)
-        return
-    except Exception:                                          # noqa: BLE001 - a notification must never break the run
+        error = err
+    except Exception as exc:                                   # noqa: BLE001 - e.g. client construction itself
         log.exception("Unexpected error sending the completion email")
-        oplog.record(conn, OPERATION, FAILED, "Notification failed: an unexpected problem occurred.", outcome.event_id)
+        error = _map_error(exc)
+    if error is None:
+        oplog.record(conn, OPERATION, SENT, f"Notification sent to {', '.join(recipients)}.", outcome.event_id)
         return
+    if error.connectivity:
+        oplog.record(conn, OPERATION, SKIPPED, "Notification skipped — no connectivity.", outcome.event_id)
+    else:
+        oplog.record(conn, OPERATION, FAILED, f"Notification failed: {error}", outcome.event_id)
+    return
     oplog.record(conn, OPERATION, SENT, f"Notification sent to {', '.join(recipients)}.", outcome.event_id)
