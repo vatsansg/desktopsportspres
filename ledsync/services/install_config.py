@@ -79,6 +79,13 @@ def load_config_file(path: Path) -> dict:
             "registers a real Windows Task Scheduler entry, which needs a password this file must never "
             "contain. Set 'schedule_days'/'schedule_time'/'schedule_username' to pre-fill the Settings -> "
             "Scheduling page instead, then enable it (and enter the password) there after installing.")
+    if "email_enabled" in data and not isinstance(data["email_enabled"], bool):
+        # Found by the Phase 13 pre-hand-off review: Python's bool("false") is True, so a
+        # hand-edit mistake like "email_enabled": "false" (a quoted string - plausible, since
+        # most fields in this file ARE quoted strings) would otherwise silently turn notifications
+        # ON. A real JSON boolean (true/false, no quotes) is required explicitly.
+        raise InstallConfigError(
+            "'email_enabled' must be a real JSON boolean (true or false, not a quoted string).")
     # A leading underscore is a documentation-only convention (JSON has no real comments) - e.g.
     # "_comment" in the example file - never a real setting, so it is exempt from the unknown-field
     # check below and simply ignored by seed().

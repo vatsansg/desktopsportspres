@@ -65,3 +65,27 @@ pre-filled after a fresh install instead of being retyped into Settings on every
 
 See `ledsync/services/install_config.py` for the exact field list and validation (every field goes
 through the same `validate_*`/`save_*` functions the Settings pages themselves use).
+
+## Before you enable Scheduling on a venue machine
+
+Two real prerequisites, found during Phase 12's live validation, that Windows itself requires and
+this application cannot grant on your behalf:
+
+- **The Windows account needs the "Log on as a batch job" right.** Without it, Task Scheduler
+  fails to launch the scheduled run at all (`Error Value: 2147943785` /
+  `ERROR_LOGON_TYPE_NOT_GRANTED` in the Task Scheduler event log) — not something
+  `services/scheduler.py`'s `schtasks.exe /Create` call can grant itself. Grant it via
+  `secpol.msc` → Local Policies → User Rights Assignment → "Log on as a batch job" → add the
+  account. On a domain/Intune-managed machine this may need a Group Policy change instead of a
+  local one.
+- **If the account running the schedule is *different* from the account used interactively**
+  (a dedicated unattended account, per BRD Addendum A §39.6), it needs explicit NTFS access to the
+  application's data folder (`%LocalAppData%\LEDAssetSync` for whichever account installed/uses
+  the app interactively) — Windows' normal per-profile isolation otherwise blocks it entirely,
+  even for an administrator. Either grant that access explicitly (`icacls <data folder>
+  /grant <account>:(OI)(CI)F`), or — simpler — enable scheduling under the same account used
+  interactively.
+
+Both are one-time, per-machine setup steps; neither is something the installer or the application
+itself can do automatically (the first needs a Windows security-policy change, the second needs to
+know a folder that may not exist yet until the app has run at least once).

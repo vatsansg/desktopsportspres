@@ -105,7 +105,7 @@ def conn(cfg):
     init_db(cfg.db_path)
     c = connect(cfg.db_path)
     for event in ("1000", "2000"):
-        c.execute("INSERT INTO events (event_id, event_name, event_guid) VALUES (?, 'x', 'g')", (event,))
+        c.execute("INSERT INTO events (event_id, event_name, event_guid) VALUES (?, 'x', ?)", (event, f"g-{event}"))
     c.commit()
     yield c
     c.close()

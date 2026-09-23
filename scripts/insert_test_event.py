@@ -79,10 +79,14 @@ def main() -> int:
         inserted, skipped = 0, []
         for event_id, name, updated, status in (SEVERAL if args.several else ONE):
             try:
+                # Distinct per row (events.event_guid is now uniquely indexed, case-insensitively -
+                # Phase 13 pre-hand-off review) - a shared placeholder would make every row after
+                # the first silently collide and be skipped.
+                fake_guid = f"00000000-0000-0000-0000-{event_id.zfill(12)}"
                 conn.execute(
                     "INSERT INTO events (event_id, event_name, event_guid, configuration_file, "
                     "last_updated, status) VALUES (?, ?, ?, ?, ?, ?)",
-                    (event_id, name, "00000000-0000-0000-0000-000000000000", MARK, updated, status),
+                    (event_id, name, fake_guid, MARK, updated, status),
                 )
                 inserted += 1
             except sqlite3.IntegrityError:

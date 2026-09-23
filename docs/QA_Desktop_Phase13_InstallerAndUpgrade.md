@@ -8,7 +8,7 @@
 | Step / Phase | Phase 13 — Installer and Upgrade Handling (Step 13.1 new installation path; Step 13.2 upgrade path) |
 | BRD reference(s) | Desktop BRD Section 27 (Installation Requirements), Section 13/14 (Database location), Section 29 (first-time workflow, used as Step 13.1's own validation), Section 36 (schema migration approach, resolved this phase); Desktop BRD Addendum A Section 39.4 (installer distribution, confirmed) |
 | Implementation Sequence reference | Steps 13.1, 13.2 |
-| Date | 23/09/26 |
+| Date | 23–24/09/26 |
 | Tested by | Claude Code (automated + a real PyInstaller freeze and a real compiled Inno Setup installer, both built and live-tested on this machine — the Inno Setup Compiler was installed with the owner's explicit go-ahead; see "Live validation" below). |
 | Environment | Windows 11 Pro, Python 3.11.9, PyInstaller 6.22.3. |
 
@@ -60,24 +60,62 @@
 | TC-A06 | **`main.py --seed-config` integration:** applies a real file to a brand-new database; is silently a no-op (not an error) against an already-configured one; never raises on a malformed file (logged instead); never calls `platform_checks.webview2_version()` at all in this mode | Pass |
 | TC-A07 | **The example install-config file stays in sync with the real field schema** — `installer/install-config.example.json` is loaded through the real validator in the test suite, so a future field rename/removal fails the build instead of silently going stale | Pass |
 
-`.\.venv\Scripts\python -m pytest -q` → **1519 passed, 14 skipped** (unrelated live-Azure-Storage tests from earlier phases).
+`.\.venv\Scripts\python -m pytest -q` → **1528 passed, 14 skipped** (unrelated live-Azure-Storage tests from earlier phases).
+
+## All-phases pre-hand-off review (24/09/26) — findings and fixes
+
+A single independent architect review covering every phase (0–13), requested by the owner ahead of
+hand-off rather than a Phase-13-only pass (see "Independent Solution Architect review" below for
+the review's own verdict). **No blockers.** Nine "should-fix" items, all addressed same day:
+
+| # | Finding | Fix |
+|---|---|---|
+| 1 | `events.event_guid` had no database-level uniqueness constraint — Phase 3's own carried-forward hardening item, never actually implemented despite Phase 13 building the exact migration infrastructure that could have closed it. Enforced only at the application layer (`registration.py`'s SELECT-then-INSERT — a TOCTOU gap mitigated in practice by the single-instance lock, not eliminated by it). | Added `db/connection.py`'s `_ensure_event_guid_index()` — a real `UNIQUE INDEX ... (event_guid COLLATE NOCASE) WHERE event_guid IS NOT NULL`, mirroring the existing `event_id` index's same graceful-degradation pattern (a pre-existing DB with duplicates simply doesn't get the index; the app still starts; the problem is logged). 4 new tests. Two existing test fixtures (`test_phase6_rpi_review.py`, `test_phase7_engine.py`) and one dev script (`scripts/insert_test_event.py`) turned out to insert multiple events sharing one hardcoded fake GUID — harmless before, a real collision under the new constraint — fixed to use distinct per-event values. |
+| 2 | BRD Section 25's "Application Update" operation was reserved in `oplog.OPERATIONS` (tagged "later Phase 13") but nothing ever wrote it — a real schema upgrade left zero operational-log trace that it had happened. | Added `db/connection.py`'s `_record_schema_upgrade()` — a raw `INSERT` (not `services/oplog.add()`, to avoid `db/` importing from `services/`), best-effort and never fatal to a successful upgrade. 2 new tests. |
+| 3 | `tests/test_no_secrets.py`'s guard never covered the different literal an Azure Communication Services connection string actually uses (`accesskey=`, Phase 11) — only Blob Storage's key-assignment property name. A real leaked ACS key would only have been caught by coincidence. | Added a dedicated pattern (`accesskey=` + 60 or more base64 characters — real keys observed 83–88 characters with no reliable `==` padding, comfortably above every fake test key in this repo at 40–41 characters). 1 new test proving it catches a real-shaped key and ignores every fake one. |
+| 4 | `install_config.py`'s `bool(data.get("email_enabled", False))` silently mis-parses a hand-edit mistake like `"email_enabled": "false"` (a quoted string) — Python's `bool("false")` is `True`, so a venue operator's typo could silently turn email notifications ON. | `load_config_file()` now requires `email_enabled`, when present, to be a real JSON boolean (`isinstance(..., bool)`), rejected otherwise with a clear message — same treatment already given `schedule_password`/`schedule_enabled`. 2 new tests. |
+| 5 | The uninstaller never removed a registered Windows Task Scheduler entry — after uninstalling on a machine that had scheduling enabled, the task survives pointing at a now-deleted executable. | Added `[UninstallRun]` to `ledsync.iss`: `schtasks /Delete /TN "LEDAssetSync Scheduled Run" /F`, tolerant of "not found" exactly like `services/scheduler.py`'s own `unregister()`. Recompiled and live-tested: a real uninstall (no task registered, the common case) still completes cleanly. |
+| 6 | Two real runbook prerequisites Phase 12 explicitly promised to carry into Phase 13 (the "Log on as a batch job" right; NTFS access when the scheduled account differs from the interactive one) existed only in `workflow.md`/the Phase 12 QA doc — nowhere a venue IT person setting up Phase 13's installer would actually read them. | Added a "Before you enable Scheduling on a venue machine" section to `installer/README.md` covering both. |
+| 7 | Unreachable dead code in `email_notify.py`'s `notify()` — an `oplog.record(...)` call after the function's final `return`. Harmless (every real branch above it already logs correctly) but should not exist. | Deleted. |
+| 8 | Phase 3's other carried item ("widen the rejection logger" to carry table/LED-type/file-name context) is only partially reflected in `exceptions.py`'s `record_rejection()` convenience wrapper, which still covers settings/mapping-save rejections only. | **Assessed, not changed**: the lower-level `exceptions.record()` function it wraps already fully supports that context and is used directly wherever a download/sync-time exception needs it; `record_rejection()` staying narrow (settings-save only, which never has file/table context to give) looks like correct, intentional scope rather than an incomplete widening. Recorded here rather than silently dropped again. |
+| 9 | No live Azure Storage/ACS network call had been made from the actual **frozen** `LEDAssetSync.exe` (as opposed to `python -m ledsync` from source) — if PyInstaller's TLS/certificate bundling were subtly wrong, the failure mode is exactly the kind of environment-only bug this review was commissioned to hunt for. | **Not completed** — doing this safely needs either GUI automation for the native WebView2 window (not available in this environment) or the real event's real GUID to drive the headless exe directly, neither of which was available without risk. Recorded as F-87 for the owner. |
+
+**A tenth issue found independently, during this same round of testing** (not from the review agent): two apparent "Setup shows a blocking dialog under `/VERYSILENT`" failures during a second scratch-install validation pass. Traced to the test harness, not Inno Setup: Git Bash's automatic argument path-conversion was silently mangling `/VERYSILENT` into a bogus path (`C:/Program Files/Git/VERYSILENT`) before it ever reached `Setup.exe`. Retested correctly (`MSYS_NO_PATHCONV=1`) and `/VERYSILENT` alone was always sufficient — not a real defect. `ledsync.iss`'s `PrivilegesRequiredOverridesAllowed` was still simplified away (removed entirely) while investigating, since an unconditional per-user install (no all-users/admin choice at all) is a reasonable hardening regardless of root cause for a single-machine, single-operator application — recompiled and live-tested: a per-user install now always lands under `HKEY_CURRENT_USER`, never the all-users locations seen in an earlier test run before this simplification (closes F-83 below).
+
+All fixes verified: `pytest -q` → 1528 passed (was 1519); a fresh PyInstaller freeze + Inno Setup compile was rebuilt from the fixed source and re-validated end to end (install → uninstall, including the new schtasks delete step; per-user install location confirmed via the real registry hive used).
 
 ## Open defects / follow-ups
 
 | ID | Description | Severity | Status |
 |---|---|---|---|
-| F-83 | The installer's `PrivilegesRequired=lowest` design means `--seed-config` runs as whichever account launches `Setup.exe`, with no elevation — the seeded database lands in *that* account's own `%LocalAppData%`. Almost always correct (the installing operator is also the daily user), but worth the owner confirming this matches how venue machines are actually set up, especially if installation is ever done by IT staff on behalf of a different operator account. Observed live: on an account with local admin rights, Setup opportunistically wrote shortcuts/registry to ALL-USERS locations (`C:\ProgramData`, `C:\Users\Public\Desktop`, `HKEY_LOCAL_MACHINE`) rather than strictly per-user ones, even with `/CURRENTUSER` passed — Inno Setup's own documented behaviour when admin rights are available and `PrivilegesRequiredOverridesAllowed` permits it. Not a defect (the generated uninstaller reverses either choice cleanly, confirmed live) but worth the owner being aware of. | Info | Documented in `installer/ledsync.iss`'s own header; accepted, tell me if wrong |
+| F-83 | **Closed (24/09/26).** The installer's `PrivilegesRequired=lowest` design means `--seed-config` runs as whichever account launches `Setup.exe`, with no elevation — the seeded database lands in *that* account's own `%LocalAppData%`. Almost always correct (the installing operator is also the daily user), but worth the owner confirming this matches how venue machines are actually set up. Originally observed live: on an account with local admin rights, Setup opportunistically wrote shortcuts/registry to ALL-USERS locations rather than strictly per-user ones. | `PrivilegesRequiredOverridesAllowed` removed entirely from `ledsync.iss` (see the pre-hand-off review section above) — the install is now unconditionally per-user regardless of the installing account's privileges. Re-tested live: confirmed `HKEY_CURRENT_USER`, not `HKEY_LOCAL_MACHINE`. Still worth the owner confirming per-user install location matches expectations for how venue machines are set up — kept as an info note, not a blocker. |
 | F-84 | No installer icon (`.ico`) is set for either executable — `WTT-Logo.png` is not an `.ico` file. Cosmetic only; both executables currently show the default PyInstaller/Windows icon. | Low | Accepted; owner to supply a real `.ico` when convenient |
 | F-85 / S-77 | **Closed, found and fixed live.** The "Launch {#MyAppName} now" postinstall `[Run]` entry fired even under `/VERYSILENT` (`skipifsilent` did not reliably suppress it in this environment) — a scratch-install test run unexpectedly launched a real application window against this machine's real default data folder. | Fixed by removing the postinstall launch entry entirely from `ledsync.iss` — recompiled and retested; confirmed no launch occurs on a silent install. |
 | F-86 | No literal "genuinely clean Windows machine" run has been done (BRD Step 13.1's own wording) — this is the development machine. Everything else under "Live validation" was tested as rigorously as possible without one (scratch install/data locations, direct file/registry inspection, a real upgrade-preserves-data proof). | Info | **Needs the owner** — ideally a real clean machine or VM, following `installer/README.md` |
+| F-87 (new, all-phases review) | No live Azure Storage/ACS network call has been made from the actual **frozen** `LEDAssetSync.exe` (only from source, and only the headless `LEDAssetSyncScheduled.exe`/`--seed-config`/`--auto-close` paths have been exercised frozen). If PyInstaller's TLS/certificate bundling were subtly wrong, this is exactly the class of environment-only bug that would only surface on a real venue machine with no dev Python present. `pyinstaller-hooks-contrib`'s `hook-certifi.py` ran automatically during the build (a real, positive signal this is well-trodden ground), but this is not the same as proving it. | Info | **Recommend before real venue deployment** — from the compiled `LEDAssetSync.exe`, register the real test event and run a real Download & Sync, or at minimum a Cloud Storage "Test Connection" |
 
 ## Independent Solution Architect review
 
-Not yet run for this phase in isolation — per the owner's explicit instruction (23 Sep 2026), a single, broader end-to-end architect review covering **every** phase (0–13) is scheduled ahead of final hand-off, rather than a Phase-13-only pass followed by a separate all-phases pass. See that review's own report for findings and outcome once complete.
+Per the owner's explicit instruction (23 Sep 2026), a single, broader end-to-end architect review
+covering **every** phase (0–13) ran ahead of final hand-off, rather than a Phase-13-only pass
+followed by a separate all-phases pass — see the full report delivered 24/09/26.
+
+**Verdict: "Ready to ship with fixes." No blockers.** Nine should-fix items, all addressed the same
+day (see "All-phases pre-hand-off review" above for the full list and fixes). The review's own
+words on the pattern behind most findings: "several 'carried forward' items from earlier phases
+were never actually closed despite later phases' docs implying the infrastructure now existed to
+close them — exactly the 'gaps in implementation' pattern the owner flagged as the reason for this
+review." Confirmed genuinely sound (not re-litigated, taken as verified): end-to-end secrets
+handling for all four credential types, the AST-based read-only-Azure guard, SQL injection safety,
+Task Scheduler XML escaping, the single-instance lock, the migration runner's correctness, Inno
+Setup's upgrade safety, and — the review's specific focus — no code-path drift between the
+scheduled run and the interactive Dashboard's Download & Sync, the email notifier, or the
+Dashboard's status display.
 
 ## Sign-off
 
 | Role | Name | Date | Outcome |
 |---|---|---|---|
-| Independent Solution Architect review | — | — | Pending — covered by the all-phases review requested ahead of hand-off (see above) |
+| Independent Solution Architect review | Independent review agent (fresh context, all-phases) | 24/09/26 | **Ready to ship with fixes; no blockers.** Nine should-fix items, all fixed same day (1528 tests pass, was 1519). |
+| User (Vatsan) go-ahead | Vatsan | pending | pending — F-86 (a literal clean-machine run) and F-87 (a live Azure call from the frozen exe) recommended before real venue deployment |
 | User (Vatsan) go-ahead | Vatsan | pending | pending — needs the Inno Setup packaging + clean-machine/upgrade validation (F-82) and the all-phases review |

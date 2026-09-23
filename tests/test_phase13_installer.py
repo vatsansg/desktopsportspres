@@ -57,6 +57,35 @@ def test_run_migrations_is_a_no_op_when_already_at_target(tmp_path):
     conn.close()
 
 
+def test_a_real_schema_upgrade_is_recorded_in_the_operational_log(cfg):
+    """Found by the Phase 13 pre-hand-off review: a real schema upgrade previously left no
+    operational-log trace at all (BRD Section 25's "Application Update" operation was reserved
+    in oplog.OPERATIONS but nothing ever wrote it)."""
+    conn = sqlite3.connect(cfg.db_path)
+    conn.execute("CREATE TABLE events (event_id TEXT PRIMARY KEY, event_name TEXT NOT NULL, event_guid TEXT, "
+                 "configuration_file TEXT, configuration_json TEXT, configuration_version TEXT, "
+                 "last_updated TEXT, last_download TEXT, last_sync TEXT, status TEXT)")
+    conn.execute("PRAGMA user_version = 1")
+    conn.commit()
+    conn.close()
+    init_db(cfg.db_path)                                              # the "upgrade"
+    conn = connect(cfg.db_path)
+    rows = conn.execute("SELECT operation, status, message FROM operation_log "
+                        "WHERE operation = 'Application Update'").fetchall()
+    assert len(rows) == 1
+    assert rows[0]["status"] == "Success"
+    assert "version 1 to 2" in rows[0]["message"]
+    conn.close()
+
+
+def test_a_fresh_database_never_gets_an_application_update_row(cfg):
+    init_db(cfg.db_path)
+    conn = connect(cfg.db_path)
+    rows = conn.execute("SELECT * FROM operation_log WHERE operation = 'Application Update'").fetchall()
+    assert rows == []
+    conn.close()
+
+
 def test_init_db_on_a_real_pre_phase_10_database_reaches_current_schema_version(cfg):
     """The one real migration registered so far (cutoff_enabled/cutoff_time, Phase 10) - proves the
     framework against an actual upgrade, not just synthetic migrations."""
@@ -115,6 +144,22 @@ def test_load_config_file_refuses_a_schedule_enabled_field(tmp_path):
     path.write_text('{"schedule_enabled": true}', encoding="utf-8")
     with pytest.raises(ic.InstallConfigError):
         ic.load_config_file(path)
+
+
+def test_load_config_file_refuses_a_quoted_string_for_email_enabled(tmp_path):
+    """Found by the Phase 13 pre-hand-off review: Python's bool("false") is True, so a hand-edit
+    mistake like this would otherwise silently turn email notifications ON."""
+    path = tmp_path / "install-config.json"
+    path.write_text('{"email_enabled": "false"}', encoding="utf-8")
+    with pytest.raises(ic.InstallConfigError):
+        ic.load_config_file(path)
+
+
+def test_load_config_file_accepts_a_real_json_boolean_for_email_enabled(tmp_path):
+    path = tmp_path / "install-config.json"
+    path.write_text('{"email_enabled": false}', encoding="utf-8")
+    data = ic.load_config_file(path)
+    assert data["email_enabled"] is False
 
 
 def test_load_config_file_refuses_an_unrecognised_field(tmp_path):

@@ -56,8 +56,16 @@ AppPublisher={#MyAppPublisher}
 DefaultDirName={localappdata}\Programs\LEDAssetSync
 DefaultGroupName={#MyAppName}
 DisableProgramGroupPage=yes
+; No PrivilegesRequiredOverridesAllowed: with PrivilegesRequired=lowest alone, Setup always
+; installs per-user, never elevated - simpler and more predictable than also allowing an
+; all-users choice (via "dialog" or "commandline") that this application has no real need for.
+; (Two earlier apparent "Setup shows a dialog under /VERYSILENT" failures during live testing
+; were traced to the test harness itself - Git Bash's automatic argument path-conversion was
+; silently mangling "/VERYSILENT" into a bogus path before it ever reached Setup.exe, not a real
+; Inno Setup defect. Retested correctly - with MSYS_NO_PATHCONV=1 - and /VERYSILENT alone was
+; always sufficient. This simplification is kept anyway: it removes an install-mode choice this
+; single-machine, single-operator application never needed in the first place.)
 PrivilegesRequired=lowest
-PrivilegesRequiredOverridesAllowed=commandline dialog
 OutputDir=output
 OutputBaseFilename=LEDAssetSync-Setup-{#MyAppVersion}
 Compression=lzma2
@@ -103,6 +111,15 @@ Filename: "{app}\{#MyAppExeName}"; Parameters: "--seed-config ""{code:InstallCon
 ; upgrade) never loses venue data. An operator who genuinely wants a clean slate deletes
 ; %LocalAppData%\LEDAssetSync by hand.
 Type: filesandordirs; Name: "{app}"
+
+[UninstallRun]
+; Removes the real Windows Task Scheduler entry (found missing by the Phase 13 pre-hand-off
+; review) - if the operator ever enabled Settings -> Scheduling, that page registered a real task
+; directly via schtasks.exe (services/scheduler.py); without this, uninstalling the application
+; leaves that task behind, pointing at a now-deleted executable. Harmless if scheduling was never
+; enabled - schtasks reports "not found", which does not block or fail the uninstall either way
+; (the same tolerant treatment services/scheduler.py's own unregister() already gives this).
+Filename: "{sys}\schtasks.exe"; Parameters: "/Delete /TN ""LEDAssetSync Scheduled Run"" /F"; Flags: runhidden; RunOnceId: "RemoveScheduledTask"
 
 [Code]
 function InstallConfigPath(Param: String): String;

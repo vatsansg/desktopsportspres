@@ -158,5 +158,3 @@ def notify(conn: sqlite3.Connection, outcome: RunOutcome, *, client_factory=None
         oplog.record(conn, OPERATION, SKIPPED, "Notification skipped — no connectivity.", outcome.event_id)
     else:
         oplog.record(conn, OPERATION, FAILED, f"Notification failed: {error}", outcome.event_id)
-    return
-    oplog.record(conn, OPERATION, SENT, f"Notification sent to {', '.join(recipients)}.", outcome.event_id)

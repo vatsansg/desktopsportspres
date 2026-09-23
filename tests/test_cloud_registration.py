@@ -3,6 +3,7 @@ and Step 4.1: the Cloud Storage settings screen. Uses a faithful fake of the Azu
 
 import json
 import re
+import sqlite3
 from pathlib import Path
 
 import pytest
@@ -271,6 +272,63 @@ def test_startup_survives_an_existing_database_that_already_has_case_duplicates(
     conn.execute("DROP INDEX IF EXISTS ux_events_event_id_nocase")
     conn.execute("INSERT INTO events (event_id, event_name) VALUES ('abc', 'one')")
     conn.execute("INSERT INTO events (event_id, event_name) VALUES ('ABC', 'two')")
+    conn.commit()
+    conn.close()
+    init_db(cfg.db_path)                                                              # must not raise
+
+
+def test_the_database_itself_refuses_two_events_with_the_same_guid(cfg):
+    """A real backstop behind registration.py's own SELECT-then-INSERT check (a TOCTOU gap
+    mitigated by, but not eliminated without, the single-instance lock) - found by the Phase 13
+    pre-hand-off review."""
+    from ledsync.db import init_db
+
+    init_db(cfg.db_path)
+    conn = connect(cfg.db_path)
+    conn.execute("INSERT INTO events (event_id, event_name, event_guid) VALUES ('1000', 'a', "
+                "'11111111-1111-1111-1111-111111111111')")
+    conn.commit()
+    with pytest.raises(sqlite3.IntegrityError):
+        conn.execute("INSERT INTO events (event_id, event_name, event_guid) VALUES ('2000', 'b', "
+                    "'11111111-1111-1111-1111-111111111111')")     # same GUID, different case handled below
+    conn.close()
+
+
+def test_the_database_itself_treats_guids_differing_only_by_case_as_the_same(cfg):
+    from ledsync.db import init_db
+
+    init_db(cfg.db_path)
+    conn = connect(cfg.db_path)
+    conn.execute("INSERT INTO events (event_id, event_name, event_guid) VALUES ('1000', 'a', ?)",
+                ("11111111-1111-1111-1111-111111111111",))
+    conn.commit()
+    with pytest.raises(sqlite3.IntegrityError):
+        conn.execute("INSERT INTO events (event_id, event_name, event_guid) VALUES ('2000', 'b', ?)",
+                    ("11111111-1111-1111-1111-111111111111".upper(),))
+    conn.close()
+
+
+def test_multiple_events_with_no_guid_at_all_are_not_treated_as_duplicates(cfg):
+    from ledsync.db import init_db
+
+    init_db(cfg.db_path)
+    conn = connect(cfg.db_path)
+    conn.execute("INSERT INTO events (event_id, event_name, event_guid) VALUES ('1000', 'a', NULL)")
+    conn.execute("INSERT INTO events (event_id, event_name, event_guid) VALUES ('2000', 'b', NULL)")
+    conn.commit()                                                                     # must not raise
+    conn.close()
+
+
+def test_startup_survives_an_existing_database_that_already_has_guid_case_duplicates(cfg):
+    from ledsync.db import init_db
+
+    init_db(cfg.db_path)
+    conn = connect(cfg.db_path)
+    conn.execute("DROP INDEX IF EXISTS ux_events_event_guid_nocase")
+    conn.execute("INSERT INTO events (event_id, event_name, event_guid) VALUES ('1000', 'a', ?)",
+                ("11111111-1111-1111-1111-111111111111",))
+    conn.execute("INSERT INTO events (event_id, event_name, event_guid) VALUES ('2000', 'b', ?)",
+                ("11111111-1111-1111-1111-111111111111".upper(),))
     conn.commit()
     conn.close()
     init_db(cfg.db_path)                                                              # must not raise
