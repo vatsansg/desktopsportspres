@@ -26,7 +26,8 @@ from .storage import StorageError
 log = logging.getLogger(__name__)
 
 MAX_FILES_PER_RUN = 2000
-RETRY_DELAY = 2.0                                 # seconds before the single automatic retry
+RETRY_COUNT = 1                                   # extra tries after the first (Settings -> Download, Phase 10)
+RETRY_DELAY = 2.0                                 # seconds before each automatic retry (Settings -> Download, Phase 10)
 STOP_CATEGORIES = (exceptions.STORAGE_CONNECTIVITY, exceptions.PERMISSION)
 
 
@@ -66,23 +67,34 @@ def history(conn, event_id, item, table, led_type, source: str, local: str, stat
                  (event_id, item.file_name, table, led_type, source, local, item.cloud_time_text, _now(), status))
 
 
-def _retry(action):
-    """Run `action`; a transient problem (connection, wrong checksum) gets ONE more try after a short pause."""
-    try:
-        return action()
-    except (StorageError, localfiles.IntegrityError) as err:
-        changed = isinstance(err, StorageError) and err.category == exceptions.DOWNLOAD and "changed in Azure" in err.message
-        if isinstance(err, StorageError) and err.category not in STOP_CATEGORIES and not changed:
-            raise
-        time.sleep(RETRY_DELAY)
-        return action()
+def _retry(action, retries: int | None = None, delay: float | None = None):
+    """Run `action`; a transient problem (connection, wrong checksum) gets `retries` more tries, each after a pause
+    of `delay` seconds. `None` (the default) falls back to the module constants `RETRY_COUNT` / `RETRY_DELAY` -
+    read fresh on every call, so a test's monkeypatch of those still works. A real run passes its own Settings ->
+    Download values explicitly instead (see `downloads.py`), so two concurrent jobs for different events can never
+    see - or leave behind - each other's retry configuration; nothing here is a shared, mutable global."""
+    retries = RETRY_COUNT if retries is None else retries
+    delay = RETRY_DELAY if delay is None else delay
+    attempt = 0
+    while True:
+        try:
+            return action()
+        except (StorageError, localfiles.IntegrityError) as err:
+            changed = isinstance(err, StorageError) and err.category == exceptions.DOWNLOAD and "changed in Azure" in err.message
+            if isinstance(err, StorageError) and err.category not in STOP_CATEGORIES and not changed:
+                raise
+            attempt += 1
+            if attempt > retries:
+                raise
+            time.sleep(delay)
 
 
 def run(conn: sqlite3.Connection, storage, account: str, location, event_id: str, items, *, operation: str,
-        folder_for, existing_folder_for, table_led_of, progress, listings: dict) -> TransferResult:
+        folder_for, existing_folder_for, table_led_of, progress, listings: dict,
+        retries: int | None = None, delay: float | None = None) -> TransferResult:
     """Carry out `items` (Assessments). `folder_for(item)` creates and returns the destination folder,
     `existing_folder_for(item)` returns it only if it exists (for removals), `table_led_of(item)` gives the
-    (table number or None, LED type) recorded in the history."""
+    (table number or None, LED type) recorded in the history. `retries` / `delay`: see `_retry`."""
     result = TransferResult()
     for index, item in enumerate(items):
         if progress.cancelled:
@@ -112,7 +124,7 @@ def run(conn: sqlite3.Connection, storage, account: str, location, event_id: str
                         size=info.size, md5=info.md5, on_bytes=progress.add_bytes, cancelled=lambda: progress.cancelled)
                     return info, written
 
-                info, target = _retry(attempt)
+                info, target = _retry(attempt, retries, delay)
                 history(conn, event_id, item, table, led, location.blob_url(account, info.path), str(target), "Success")
                 oplog.add(conn, operation, "Success", f"Downloaded {item.file_name}.", event_id)
                 exceptions.resolve_matching(conn, event_id, operation, table_number=table, led_type=led, file_name=item.file_name)

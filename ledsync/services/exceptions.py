@@ -162,3 +162,16 @@ def record_rejection(conn: sqlite3.Connection, oplog_operation: str, operation: 
     message = re.sub(r"'[^']*'", "'...'", message)[:300]
     record(conn, category, operation, message, event_id=event_id)
     oplog.record(conn, oplog_operation, "Failed", message, event_id)
+
+
+def prune(conn: sqlite3.Connection, before_iso: str) -> int:
+    """Delete exception-log rows older than `before_iso` (a UTC ISO timestamp). Returns the number removed.
+    Never raises outward - a failed prune must not stop the application from starting."""
+    try:
+        n = conn.execute("DELETE FROM exception_log WHERE timestamp < ?", (before_iso,)).rowcount
+        conn.commit()
+        return n
+    except sqlite3.Error:
+        conn.rollback()
+        log.exception("Could not prune the exception log")
+        return 0

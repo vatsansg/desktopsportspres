@@ -10,6 +10,13 @@ the project owner approved on 20 Sep 2026 ("Extend now"). Extensions are marked
   exception_log (5 columns)     Section 21.1 requires table, LED type, file name,
                                 source and destination on every exception
                                 record; Section 26 lists only 7 columns.
+  events.cutoff_enabled,        Phase 10, owner decision (22 Sep 2026, refined same day): the BRD
+  events.cutoff_time            14/18 "Last Updated Timestamp Cut-off" is a recurring DAILY time of
+                                day (UTC, e.g. "21:00"), not a one-time date, and is per event, not a
+                                single application-wide setting - so both live on the event row
+                                rather than in `application_settings`. `cutoff_enabled` is the
+                                emergency on/off switch; `cutoff_time` is kept even while disabled so
+                                it need not be retyped.
 
 Timestamps are stored as TEXT. The storage format (and local-time-vs-UTC) is
 deliberately not decided here - it is an open BRD Section 36 item that must be
@@ -36,7 +43,9 @@ CREATE TABLE IF NOT EXISTS events (
     last_updated          TEXT,
     last_download         TEXT,
     last_sync             TEXT,
-    status                TEXT
+    status                TEXT,
+    cutoff_enabled        INTEGER NOT NULL DEFAULT 0,  -- EXT (Phase 10, BRD 14/18: the daily cut-off's on/off switch)
+    cutoff_time           TEXT   -- EXT (Phase 10, BRD 14/18: the daily cut-off's time of day, UTC "HH:MM")
 );
 
 CREATE TABLE IF NOT EXISTS led_mappings (
@@ -120,7 +129,7 @@ TABLES: dict[str, list[str]] = {
     "events": [
         "event_id", "event_name", "event_guid", "configuration_file",
         "configuration_json", "configuration_version", "last_updated",
-        "last_download", "last_sync", "status",
+        "last_download", "last_sync", "status", "cutoff_enabled", "cutoff_time",
     ],
     "led_mappings": [
         "mapping_id", "event_id", "table_number", "led_type", "ip_address",

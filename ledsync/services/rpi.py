@@ -40,7 +40,7 @@ def rpi_items(comparison: changes.Comparison, event_dir=None) -> list[changes.As
 
 
 def process(conn, storage, account: str, location: EventLocation, event_id: str, comparison: changes.Comparison,
-            rpi_root, data_dir, progress=None) -> transfer.TransferResult:
+            rpi_root, data_dir, progress=None, *, retries=None, delay=None) -> transfer.TransferResult:
     """Carry out the RPI downloads and removals of `comparison`. Raises `localfiles.LocalFileError` only if the RPI
     folder itself cannot be used; problems with single files are counted."""
     progress = progress or NullProgress()
@@ -54,4 +54,4 @@ def process(conn, storage, account: str, location: EventLocation, event_id: str,
         return transfer.TransferResult()
     return transfer.run(conn, storage, account, location, event_id, items, operation=OPERATION,
                         folder_for=lambda item: event_dir, existing_folder_for=lambda item: event_dir,
-                        table_led_of=lambda item: (None, changes.RPI), progress=progress, listings={})
+                        table_led_of=lambda item: (None, changes.RPI), progress=progress, listings={}, retries=retries, delay=delay)

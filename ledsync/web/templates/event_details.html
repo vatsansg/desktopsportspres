@@ -39,6 +39,39 @@
     </div>
   </section>
 
+  <section aria-labelledby="cutoff-heading" class="block">
+    <h2 id="cutoff-heading">Timestamp Cut-off</h2>
+    <p class="hint">A daily quiet period, only for this event. Once enabled, a check only downloads or removes files changed
+      <strong>up to and including</strong> the most recent time this cut-off has passed today (or, before it has passed today, up to
+      yesterday's). Anything changed after that is held back &mdash; not lost &mdash; and is picked up automatically once the next day's
+      cut-off passes. Turn it off at any time, for example in an emergency, to fetch everything immediately.</p>
+    {% if cutoff_boundary_iso %}
+    <p id="cutoff-status" class="hint mono" data-utc-instant-preview="{{ cutoff_boundary_iso }}"></p>
+    {% endif %}
+    {% if cutoff_error %}
+    <p id="cutoff-error" class="alert alert-error" role="alert">{{ cutoff_error }}</p>
+    {% endif %}
+    <form method="post" action="{{ url_for('devices.save_cutoff', event_id=event.event_id) }}" class="panel" novalidate data-busy-text="WORKING…">
+      <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+      <div class="field">
+        <label class="checkbox-label"><input type="checkbox" name="cutoff_enabled" value="1" {% if cutoff_enabled %}checked{% endif %}>
+          Enable cut-off</label>
+        <p class="hint">Turning this on needs a time below. Turning it off downloads everything, cut-off ignored &mdash; the emergency override.</p>
+      </div>
+      <div class="field">
+        <label for="cutoff_time">Cut-off time &mdash; enter in <strong>UTC</strong>, not this computer's local time; repeats every day</label>
+        <input id="cutoff_time" name="cutoff_time" type="time" value="{{ cutoff_time_typed }}" data-utc-time-preview="cutoff-time-local"
+               aria-describedby="{% if cutoff_error %}cutoff-error {% endif %}cutoff-time-hint cutoff-time-local">
+        <p id="cutoff-time-local" class="hint mono" data-utc-time-target></p>
+        <p id="cutoff-time-hint" class="hint">The box itself has no time-zone marking &mdash; whatever you type is read as UTC. This computer's
+          current UTC time is <span class="mono" data-utc-clock></span>.</p>
+      </div>
+      <div class="form-actions">
+        <button type="submit" class="btn btn-secondary">SAVE CUT-OFF</button>
+      </div>
+    </form>
+  </section>
+
   <section aria-labelledby="map-heading" class="block">
     <h2 id="map-heading">Device Mapping</h2>
     <p class="hint">For each enabled LED, enter the device's IP address (optional) and the Windows shared folder its files go to,

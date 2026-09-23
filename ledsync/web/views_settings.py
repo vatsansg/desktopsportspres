@@ -1,4 +1,5 @@
-"""Settings routes. Phase 4: the Cloud Storage section (BRD Section 14)."""
+"""Settings routes (BRD Section 14): Cloud Storage and Local Folders (Phase 4/6/7), Download, Scheduling, Email and
+Application (Phase 10)."""
 
 from flask import Blueprint, current_app, flash, redirect, render_template, request, session, url_for
 
@@ -127,3 +128,135 @@ def _test_connection(db, saved, account, container, new_key):
     db.commit()
     return render_template("settings_cloud.html", **_view_model(
         saved, account=candidate.account, container=candidate.container, notice=message)), 200
+
+
+# --- Download Settings (BRD 14; Phase 10) -------------------------------------------------------------------------
+
+def _download_page(db, retry_count_typed=None, retry_delay_typed=None, error=None):
+    saved = cs.load_download_settings(db)
+    data_dir = current_app.config["LEDSYNC"].data_dir
+    from ..services import localchangelog
+    return render_template("settings_download.html", **_ctx(
+        saved=saved, retry_count_typed=(saved.saved_retry_count if retry_count_typed is None else retry_count_typed),
+        retry_delay_typed=(saved.saved_retry_delay if retry_delay_typed is None else retry_delay_typed),
+        change_log_path=str(data_dir / localchangelog.FILENAME), error=error))
+
+
+@bp.get("/download")
+@login_required
+def download():
+    return _download_page(get_db())
+
+
+@bp.post("/download")
+@login_required
+def download_post():
+    db = get_db()
+    retry_count_typed = request.form.get("retry_count", "")[:10]
+    retry_delay_typed = request.form.get("retry_delay", "")[:10]
+    try:
+        changed = cs.save_download_settings(db, retry_count_typed, retry_delay_typed)
+    except cs.SettingsError as err:
+        exceptions.record_rejection(db, "Settings Changed", "Save Download Settings", str(err))
+        return _download_page(db, retry_count_typed, retry_delay_typed, str(err)), 400
+    flash("Download settings saved." if changed else "Nothing changed \u2014 the settings were already saved.",
+          "success" if changed else "info")
+    return redirect(url_for("settings.download"))
+
+
+# --- Scheduling Settings (BRD 14/22; storage only - Phase 12 runs the schedule) -------------------------------------
+
+def _scheduling_page(db, enabled=None, days=None, time_typed=None, error=None):
+    saved = cs.load_schedule(db)
+    return render_template("settings_scheduling.html", **_ctx(
+        saved=saved, day_choices=cs.SCHEDULE_DAYS, enabled=(saved.enabled if enabled is None else enabled),
+        days=(list(saved.days) if days is None else days),
+        time_typed=(saved.time if time_typed is None else time_typed), error=error))
+
+
+@bp.get("/scheduling")
+@login_required
+def scheduling():
+    return _scheduling_page(get_db())
+
+
+@bp.post("/scheduling")
+@login_required
+def scheduling_post():
+    db = get_db()
+    enabled = request.form.get("enabled") == "1"
+    days = request.form.getlist("days")
+    time_typed = request.form.get("time", "")[:10]
+    try:
+        changed = cs.save_schedule(db, enabled, days, time_typed)
+    except cs.SettingsError as err:
+        exceptions.record_rejection(db, "Settings Changed", "Save Scheduling Settings", str(err))
+        return _scheduling_page(db, enabled, days, time_typed, str(err)), 400
+    flash("Scheduling settings saved." if changed else "Nothing changed \u2014 the settings were already saved.",
+          "success" if changed else "info")
+    return redirect(url_for("settings.scheduling"))
+
+
+# --- Email Settings (BRD 14/23; storage only - Phase 11 sends the notification) --------------------------------------
+
+def _email_page(db, enabled=None, recipient_typed=None, error=None):
+    saved = cs.load_email(db)
+    return render_template("settings_email.html", **_ctx(
+        saved=saved, enabled=(saved.enabled if enabled is None else enabled),
+        recipient_typed=cs.redact_if_secret_like(saved.recipient if recipient_typed is None else recipient_typed),
+        error=error))
+
+
+@bp.get("/email")
+@login_required
+def email():
+    return _email_page(get_db())
+
+
+@bp.post("/email")
+@login_required
+def email_post():
+    db = get_db()
+    enabled = request.form.get("enabled") == "1"
+    recipient_typed = request.form.get("recipient", "")[:200]
+    connection_typed = request.form.get("connection_string", "")[:2000]
+    try:
+        changed = cs.save_email(db, enabled, recipient_typed, connection_typed)
+    except cs.SettingsError as err:
+        exceptions.record_rejection(db, "Settings Changed", "Save Email Settings", str(err))
+        return _email_page(db, enabled, recipient_typed, str(err)), 400
+    flash("Email settings saved." if changed else "Nothing changed \u2014 the settings were already saved.",
+          "success" if changed else "info")
+    return redirect(url_for("settings.email"))
+
+
+# --- Application Settings (BRD 14; locations are read-only - Phase 13 owns installation/upgrade) ---------------------
+
+def _application_page(db, retention_typed=None, error=None):
+    from .. import logging_setup
+    cfg = current_app.config["LEDSYNC"]
+    saved = cs.load_log_retention(db)
+    return render_template("settings_application.html", **_ctx(
+        saved=saved, retention_typed=(saved.saved if retention_typed is None else retention_typed), error=error,
+        database_path=str(cfg.db_path), app_log_path=str(logging_setup.log_dir(cfg.data_dir) / logging_setup.LOG_FILENAME)))
+
+
+@bp.get("/application")
+@login_required
+def application():
+    return _application_page(get_db())
+
+
+@bp.post("/application")
+@login_required
+def application_post():
+    db = get_db()
+    retention_typed = request.form.get("retention", "")[:10]
+    try:
+        changed = cs.save_log_retention(db, retention_typed)
+    except cs.SettingsError as err:
+        exceptions.record_rejection(db, "Settings Changed", "Save Application Settings", str(err))
+        return _application_page(db, retention_typed, str(err)), 400
+    flash("Application settings saved." if changed else "Nothing changed \u2014 the settings were already saved.",
+          "success" if changed else "info")
+    return redirect(url_for("settings.application"))

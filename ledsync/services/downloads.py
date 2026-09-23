@@ -18,6 +18,7 @@ from dataclasses import dataclass, field
 from ..db import connect
 from . import assets, changes, eventstatus, localchangelog, localfiles, oplog, rpi, sync
 from . import settings as cloud_settings
+from . import transfer
 from .progress import Progress
 from .storage import EventLocation
 from .transfer import TransferResult
@@ -193,6 +194,12 @@ def _run_job(config, storage_factory, settings, event_id: str, progress: Progres
              download: bool = True, push: bool = True, checker=None) -> list[dict]:
     conn = connect(config.db_path)
     try:
+        # Settings -> Download (Phase 10) governs both the download and push retry behaviour. Read once here and
+        # passed explicitly to every engine below - an ordinary local value, never a shared mutable global - so two
+        # jobs for different events running at the same time on their own threads can never see, or leave behind,
+        # each other's retry configuration.
+        retry_settings = cloud_settings.load_download_settings(conn)
+        retries, delay = retry_settings.retry_count, retry_settings.retry_delay
         progress.phase = "Checking"
         canonical = conn.execute("SELECT event_id FROM events WHERE event_id = ? COLLATE NOCASE", (event_id,)).fetchone()
         if canonical is None:
@@ -224,7 +231,7 @@ def _run_job(config, storage_factory, settings, event_id: str, progress: Progres
             for label, engine, folder in (("RPI files", rpi, rpi_folder), ("Files", assets, asset_folder)):
                 try:
                     result.add(engine.process(conn, storage, settings.account, location, event_id, report.comparison, folder,
-                                              config.data_dir, progress))
+                                              config.data_dir, progress, retries=retries, delay=delay))
                 except localfiles.LocalFileError as err:
                     notes.append(_line("error", f"{label}: {err}"))
                     result.failed += 1
@@ -246,7 +253,7 @@ def _run_job(config, storage_factory, settings, event_id: str, progress: Progres
             progress.identify(len(items))
             progress.set_phase("Synchronising", len(items))
             protected = (str(asset_folder), str(cloud_settings.load_rpi_folder(conn, config.data_dir).effective))
-            sresult = sync.process(conn, event_id, items, config.data_dir, progress, checker, protected)
+            sresult = sync.process(conn, event_id, items, config.data_dir, progress, checker, protected, retries, delay)
             sresult.unmapped = unmapped
             cancelled = cancelled or sresult.cancelled
             lines += _describe_sync(sresult)
