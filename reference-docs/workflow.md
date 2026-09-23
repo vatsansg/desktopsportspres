@@ -325,6 +325,6 @@ Status values: `Not started` / `In progress` / `Awaiting user go-ahead` / `Compl
 | 9 | Complete | 22 Sep 2026 | `3b298d0`, `0746e68`, `5d9bef3` (merge `1e58e0d`) |
 | 10 | Complete | 23 Sep 2026 | `e48bb8b`, `7f0261c` (merge `632576b`) |
 | 11 | Complete | 23 Sep 2026 | `8df2ca4`, `ee806d3`, `09a49b1`, `40a2a8c`, `0f69b5c` (merge `ae3d470`) |
-| 12 | In progress | | (not yet merged — blocked on owner Task Scheduler live validation) |
+| 12 | Complete | 23 Sep 2026 | `2869364`, `e26a4ab`, `97fa262`, `ef431e2` (merge `2209eeb`) |
 | 13 | Not started | | |
 | 14 | Not started | | |
