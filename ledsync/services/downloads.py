@@ -14,9 +14,10 @@ finds its summary.
 import logging
 import threading
 from dataclasses import dataclass, field
+from datetime import datetime, timezone
 
 from ..db import connect
-from . import assets, changes, eventstatus, localchangelog, localfiles, oplog, rpi, sync
+from . import assets, changes, email_notify, eventstatus, events as event_service, localchangelog, localfiles, oplog, rpi, sync
 from . import settings as cloud_settings
 from . import transfer
 from .progress import Progress
@@ -171,6 +172,45 @@ def _run_record(config, operation: str, status: str, message: str, event_id: str
         log.exception("Could not write the run-level log row")
 
 
+def _brd_status(state: str, errors: int) -> str:
+    """BRD Section 23's own wording (its examples, plus Cancelled - a real outcome elsewhere in this
+    application that the BRD's three examples do not cover). Kept separate from the run-level oplog
+    row's Success/Failed/Cancelled status vocabulary (Phase 9, unchanged): that row does not distinguish
+    a run that finished with some file-level failures from one that stopped outright, but the
+    notification, per BRD Section 23, should."""
+    if state == "cancelled":
+        return "Cancelled"
+    if state == "error":
+        return "Failed"
+    return "Successful with Exceptions" if errors else "Successful"
+
+
+def _notify(config, event_id: str, tz, progress: Progress, lines: list[dict]) -> None:
+    """Best-effort completion email (BRD 23), on its own short connection so a slow or unreachable
+    Azure Communication Services endpoint never holds the job's own connection open. Never raises -
+    email_notify.notify() logs every outcome itself and swallows its own errors."""
+    try:
+        conn = connect(config.db_path)
+        try:
+            row = conn.execute("SELECT event_name FROM events WHERE event_id = ? COLLATE NOCASE",
+                               (event_id,)).fetchone()
+            if row is None:
+                return
+            errors = [item["text"] for item in lines if item.get("level") == "error"][:20]
+            outcome = email_notify.RunOutcome(
+                event_id=event_id, event_name=row["event_name"],
+                when=event_service.format_timestamp(datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
+                                                    tz, seconds=True),
+                identified=progress.identified, downloaded=progress.downloaded, synchronised=progress.synchronised,
+                failed=progress.errors, status=_brd_status(progress.final_state, progress.errors),
+                error_summary="\n".join(errors))
+            email_notify.notify(conn, outcome)
+        finally:
+            conn.close()
+    except Exception:                                            # noqa: BLE001 - a notification must never break a run
+        log.exception("Could not send the completion notification")
+
+
 def run_job(config, storage_factory, settings, event_id: str, progress: Progress, tz=None, on_report=None, *,
             download: bool = True, push: bool = True, checker=None) -> list[dict]:
     """The whole job (blocking), bracketed by a Started row and a finished row in the operational log (the finished row
@@ -187,6 +227,8 @@ def run_job(config, storage_factory, settings, event_id: str, progress: Progress
     status = "Cancelled" if state == "cancelled" else ("Failed" if state == "error" or progress.errors else "Success")
     _run_record(config, label, status, f"Identified {progress.identified}, downloaded {progress.downloaded}, "
                                        f"synchronised {progress.synchronised}, errors {progress.errors}.", event_id)
+    if download and push:              # BRD 23/31: the completion notification follows the full Download & Sync flow
+        _notify(config, event_id, tz, progress, lines)
     return lines
 
 

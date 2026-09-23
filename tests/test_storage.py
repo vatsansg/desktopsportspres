@@ -271,6 +271,16 @@ def test_no_dynamic_attribute_access_that_could_hide_a_write_call():
     assert hits == []
 
 
+
+# storage.py is the only module allowed to touch the web application's Azure STORAGE account (the
+# read-only guarantee this whole file enforces). email_notify.py (Phase 11) imports a different Azure
+# service entirely - Communication Services, for sending the completion email - which has no read-only
+# constraint (sending an email is inherently a "write" to that unrelated service) and no access to the
+# web application's storage account; it is explicitly allowed here, and test_email_notify.py enforces
+# its own AST guard restricting IT to azure.communication.email only.
+AZURE_ALLOWED_MODULES = {"storage.py", "email_notify.py"}
+
+
 def test_no_other_http_client_and_azure_is_imported_only_by_the_storage_module():
     hits = []
     for path, tree in _modules():
@@ -283,8 +293,8 @@ def test_no_other_http_client_and_azure_is_imported_only_by_the_storage_module()
             for name in names:
                 if name.startswith(FORBIDDEN_IMPORTS):
                     hits.append(f"{path.name}:{node.lineno} imports {name}")
-                if name.startswith("azure") and path.name != "storage.py":
-                    hits.append(f"{path.name}:{node.lineno} imports {name} outside storage.py")
+                if name.startswith("azure") and path.name not in AZURE_ALLOWED_MODULES:
+                    hits.append(f"{path.name}:{node.lineno} imports {name} outside storage.py/email_notify.py")
     assert hits == []
 
 

@@ -10,8 +10,10 @@
   <h1>Settings</h1>
   {% set section = 'email' %}{% include "_settings_nav.html" %}
   <h2 class="settings-section">Email</h2>
-  <p class="lede">Who to notify when an operation finishes. <strong>This saves the settings; it does not yet send anything</strong> — sending
-    the notification (by Azure Communication Services, the same service the web application uses) arrives in a later phase.</p>
+  <p class="lede">Who to notify when a Download &amp; Sync finishes, sent by Azure Communication Services (the same
+    service the web application uses). A completion email is sent after every Download &amp; Sync run once enabled
+    below. If this computer has no internet connection at the time, the notification is silently skipped — the
+    run itself still completes and is logged normally.</p>
 
   {% if error %}
   <p id="form-error" data-focus-alert class="alert alert-error" role="alert">{{ error }}</p>
@@ -21,13 +23,19 @@
     <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
     <div class="field">
       <label class="checkbox-label"><input type="checkbox" name="enabled" value="1" {% if enabled %}checked{% endif %}> Send notification emails</label>
-      <p class="hint">Turning this on needs a recipient address below.</p>
+      <p class="hint">Turning this on needs a recipient and a sender address below.</p>
     </div>
     <div class="field">
       <label for="recipient">IT notification email address</label>
       <input id="recipient" name="recipient" type="email" value="{{ recipient_typed }}" maxlength="200" autocomplete="off"
              spellcheck="false" {% if not error %}autofocus{% endif %} aria-describedby="{% if error %}form-error {% endif %}recipient-hint">
       <p id="recipient-hint" class="hint">Where the completion summary is sent.</p>
+    </div>
+    <div class="field">
+      <label for="sender">Sender address</label>
+      <input id="sender" name="sender" type="email" value="{{ sender_typed }}" maxlength="200" autocomplete="off"
+             spellcheck="false" aria-describedby="{% if error %}form-error {% endif %}sender-hint">
+      <p id="sender-hint" class="hint">A verified sender address/domain on the Azure Communication Services resource below.</p>
     </div>
     {{ password_field("connection_string", "connection_string", "Azure Communication Services connection string", autocomplete="off",
                       required=False,
