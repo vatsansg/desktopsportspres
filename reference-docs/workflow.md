@@ -300,7 +300,7 @@ Status values: `Not started` / `In progress` / `Awaiting user go-ahead` / `Compl
   7. **Merged to `main` and pushed** — see the table below for hashes.
 
 ## Phase 13 — Installer and Upgrade Handling
-- **Status:** In progress (built and self-tested 23 September 2026 — real PyInstaller freeze built and smoke-tested on this machine; Inno Setup packaging written but not yet compiled, since the Inno Setup Compiler is a separate third-party Windows tool not installed here; not yet independently reviewed — see Deviations; not yet merged to `main`)
+- **Status:** In progress (built and self-tested 23 September 2026 — real PyInstaller freeze AND a real compiled Inno Setup installer both built and live-tested on this machine, including a real proof that an upgrade preserves an existing event/mapping; not yet independently reviewed — see Deviations; not yet merged to `main`)
 - **Includes:** Step 13.1 — new installation path (PyInstaller freeze + Inno Setup package); Step 13.2 — upgrade path (schema migration runner + install-folder/data-folder separation).
 - **Completed on:** —
 - **What was built:**
@@ -313,6 +313,7 @@ Status values: `Not started` / `In progress` / `Awaiting user go-ahead` / `Compl
   - **`installer/install-config.example.json`**, **`installer/README.md`**: the documented schema and full build procedure.
   - 27 new tests (`tests/test_phase13_installer.py`).
   - **Real PyInstaller freeze built and smoke-tested on this machine** (not simulated): both executables built cleanly first attempt; the headless exe ran end to end against a scratch data folder (correct oplog rows); `--seed-config` applied a real config file correctly with no window opened; the windowed exe opened a real WebView2 window, served the UI, and closed cleanly.
+  - **Inno Setup Compiler installed (owner's explicit go-ahead) and the real installer built and tested end to end**: `installer\ledsync.iss` compiled to a real `LEDAssetSync-Setup-0.1.0.exe`; installed (scratch location, never the real default data folder), a test event/mapping inserted, the *same* installer run again over the same install folder (an upgrade), and the event/mapping confirmed byte-for-byte intact afterward — BRD 13.2's own validation criterion, directly proven. A real bug was found live in the process (the "launch now" postinstall step fired even under `/VERYSILENT`, briefly and harmlessly opening the app against this machine's real data folder during a scratch-install test) — found, the process closed gracefully within seconds, confirmed no data was affected, and fixed by removing that postinstall entry; recompiled and re-verified. The generated uninstaller was also confirmed to remove every file/shortcut/registry entry cleanly.
   - 1519 automated tests pass (14 skipped — unrelated live-Azure-Storage tests from earlier phases).
 - **QA Test Case doc:** `docs/QA_Desktop_Phase13_InstallerAndUpgrade.md`
 - **Security Checklist:** `docs/Security_Desktop_Phase13_InstallerAndUpgrade.md`
@@ -323,8 +324,8 @@ Status values: `Not started` / `In progress` / `Awaiting user go-ahead` / `Compl
   3. **Pre-install config file: an editable text file next to the installer**, not an interactive installer wizard.
   4. **The config file can never set a Scheduling password or turn scheduling on** — only pre-fill the account name/day/time defaults; enabling still requires the operator, once, after install.
   5. **Task Scheduler registration itself remains Settings → Scheduling's job** (Phase 12 decision, unchanged) — Phase 13 does not attempt to register a task at install time, since that needs a password the installer must never hold.
-  6. **Inno Setup Compiler not installed in this environment** — a separate third-party Windows tool, not a Python package, so not installed without the owner's explicit go-ahead. The `.iss` script is written and documented (`installer/README.md`) but not yet compiled or run on a clean machine — BRD 13.1/13.2's own validation criteria (clean-machine install, then an upgrade preserving data) are not yet done. Recorded as F-82.
-  7. **Not yet merged to `main`** — pending Inno Setup compilation/clean-machine validation, the all-phases architect review, and the owner's go-ahead.
+  6. **Inno Setup Compiler installed with the owner's explicit go-ahead** (official source: `github.com/jrsoftware/issrc` releases) and used to fully validate the installer, including a real proof that an upgrade preserves existing event/mapping data (BRD 13.2). The one remaining gap: no literal "genuinely clean Windows machine" run yet (this is the development machine) — recorded as F-86, needs the owner or a real clean machine/VM.
+  7. **Not yet merged to `main`** — pending the all-phases architect review and the owner's go-ahead.
 
 ## Phase 14 — Full Workflow and Acceptance Validation
 - **Status:** Not started

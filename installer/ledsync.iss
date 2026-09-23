@@ -43,13 +43,13 @@
 #define MyAppPublisher "WTT"
 #define MyAppExeName "LEDAssetSync.exe"
 #define MyScheduledExeName "LEDAssetSyncScheduled.exe"
-; Generated once for this application and never changed - Inno Setup uses this (not the app name)
-; to recognise "this is the same application" across versions, which is what makes a later Setup
-; run an upgrade instead of a parallel second install.
-#define MyAppId "{C9E6C6B0-6C0B-4C6E-9B5B-6C7C7B9D6B10}"
 
 [Setup]
-AppId={#MyAppId}
+; Generated once for this application and never changed - Inno Setup uses this (not the app name)
+; to recognise "this is the same application" across versions, which is what makes a later Setup
+; run an upgrade instead of a parallel second install. The doubled leading brace is Inno Setup's
+; own escape for a literal "{" (a bare "{GUID}" here is parsed as a {constant} reference instead).
+AppId={{C9E6C6B0-6C0B-4C6E-9B5B-6C7C7B9D6B10}
 AppName={#MyAppName}
 AppVersion={#MyAppVersion}
 AppPublisher={#MyAppPublisher}
@@ -91,7 +91,11 @@ Name: "{autodesktop}\{#MyAppName}"; Filename: "{app}\{#MyAppExeName}"; Tasks: de
 Filename: "{app}\{#MyAppExeName}"; Parameters: "--seed-config ""{code:InstallConfigPath}"""; \
     Flags: runhidden waituntilterminated; StatusMsg: "Applying pre-install configuration..."; \
     Check: ShouldSeedConfig
-Filename: "{app}\{#MyAppExeName}"; Description: "Launch {#MyAppName} now"; Flags: nowait postinstall skipifsilent
+; Deliberately NO "launch now" entry: live-tested (23 Sep 2026) that Inno Setup's own
+; `skipifsilent` flag does not reliably suppress a postinstall launch under /VERYSILENT in every
+; environment - not worth the risk of a silent/unattended install unexpectedly opening a window
+; against a venue's real data folder. The operator opens the application deliberately, from the
+; shortcut, when ready - exactly like any other install with no "run after install" step.
 
 [UninstallDelete]
 ; The application files only - the DATA folder (database, mappings, operational history, logs) is
