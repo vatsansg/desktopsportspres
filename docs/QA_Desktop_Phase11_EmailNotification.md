@@ -9,7 +9,7 @@
 | BRD reference(s) | Desktop BRD Section 23 (Email Notification), Section 14 (Email Settings), Section 31 (Scheduled Workflow); Desktop BRD Addendum A Section 39.3 (ACS mechanism, no-connectivity business rule) |
 | Implementation Sequence reference | Step 11.1 |
 | Date | 23/09/26 |
-| Tested by | Claude Code (automated only — no live Azure Communication Services resource exists yet for this project; see "Live validation" below) |
+| Tested by | Claude Code (automated + **live against the real Azure Communication Services resource and the real Event 1000**, then confirmed received by the owner; see "Live validation" below) |
 | Environment | Windows 11 Pro, Python 3.11.9; a fake ACS client (dependency-injected) for the automated tests. |
 
 ## Owner decisions applied / defaults chosen (23/09/26) — my defaults, tell me if any is wrong
@@ -19,6 +19,8 @@
 - **BRD Section 23's overall status wording is extended with "Cancelled"** — a real outcome elsewhere in this application (a Download & Sync stopped mid-run) that the BRD's three examples (Successful / Successful with Exceptions / Failed) do not cover. The run-level operational log row's own Success/Failed/Cancelled/Started status vocabulary (Phase 9, unchanged) does not distinguish a run that finished with some file-level failures from one that stopped outright, but the notification content does, exactly per BRD 23's intent.
 - **A notification failure never affects the run's own outcome** — the Download & Sync (or Download/Sync-only) operation is already complete and logged before the notification is even attempted; sending is a pure side channel. Every outcome — sent, skipped (not configured, or the Addendum A 39.3 no-connectivity rule), or failed for some other reason — is its own row in the operational log (`Email Notification` operation, `Success` / `Skipped` / `Failed` status).
 - **The ACS connection string is parsed by hand**, not via the SDK's own `from_connection_string` (a pre-existing AST guard in `tests/test_storage.py`, built for a different reason — the read-only-Azure-Storage guarantee — blanket-forbids that method name everywhere by name alone; extended, not weakened, to explicitly allow `email_notify.py` to import the unrelated `azure.communication.email` service).
+- **Multiple, comma-separated IT recipients** (owner request, 23/09/26): "IT notification email address(es)" accepts one or more addresses; every address is validated individually (one bad address refuses the whole save, and a secret-shaped paste is refused without being echoed back). The **sender stays a single address** — Azure Communication Services allows exactly one `senderAddress` per email, a technical limit, not a design choice; confirmed with the owner before building.
+- **A dedicated sender identity created for this application** (owner-directed, 23/09/26): a new ACS sender username `desktop-notifications` was created on the same verified domain the web application's own "WTT Asset Management" sender already uses, display name **"WTT Desktop Asset Management"**, so recipients can tell the two systems' emails apart.
 
 ## What was built
 
@@ -29,14 +31,21 @@
 - `web/templates/settings_email.html` / `views_settings.py`: the Sender address field; the page's lede text updated now that Phase 11 actually sends (Phase 10's page said it did not yet).
 - `requirements.txt`: `azure-communication-email==1.1.0` (pip-audit clean; no new vulnerable transitive dependency).
 
-## Live validation against a real Azure Communication Services resource — NOT YET DONE
+## Live validation against the real Azure Communication Services resource (23/09/26)
 
-Unlike Phase 4 (where the owner supplied the real Azure Storage Account access key for live validation against Event 1000), **no real Azure Communication Services connection string or verified sender address exists yet for this project.** Addendum A Section 39.3 says these "will be supplied when Phase 11 begins" — Phase 11 has now begun. Everything below is proven against a dependency-injected fake ACS client; nothing has been sent to a real inbox. **Before this phase can be marked complete, the owner needs to supply:**
-1. A real Azure Communication Services connection string.
-2. A verified sender address/domain on that ACS resource.
-3. A real recipient address to receive the test emails.
+The owner supplied the real connection string for `cs-sportspres-assetmgmt` (Addendum A 39.3), confirmed the web application's existing ACS Email domain (`email-sportspres-assetmgmt`, sender "WTT Asset Management"), and asked for a similarly-named sender identity for this application plus two real test recipients. Setup performed (via the Azure CLI, already authenticated as the owner):
 
-Once supplied, a live check (real Download & Sync against Event 1000, real email received) should be run and recorded here, the same way Phase 4's live Azure Storage validation was recorded.
+- Confirmed the linked, verified Azure-managed Email domain on `cs-sportspres-assetmgmt` (`9a22c950-694c-41af-a41d-be6e7ad6d207.azurecomm.net`).
+- Created a new sender username on that same domain: **`desktop-notifications@9a22c950-694c-41af-a41d-be6e7ad6d207.azurecomm.net`**, display name **"WTT Desktop Asset Management"** — distinct from the web application's own "WTT Asset Management" sender, so recipients can tell the two systems apart.
+
+| ID | Check | Result |
+|---|---|---|
+| TC-L01 | The real connection string, the new sender address, and two real recipients (`wtt-naiteam@worldtabletennis.com`, `vatsan@worldtabletennis.com`, comma-separated in the one Recipient field) saved correctly through `services.settings.save_email` (the exact function the Settings page form posts to) | Pass |
+| TC-L02 | A standalone real send (`email_notify._send`, real `EmailClient`, no fake) to both recipients succeeded — Azure Communication Services accepted and confirmed the send | Pass |
+| TC-L03 | **Full pipeline, through the real running app, real HTTP, no browser mocking:** registered Event 1000 against the real Azure Storage account (Phase 4's `.env` dev credentials), mapped Table 1 Inner to a scratch device folder, triggered a real Download & Sync. Result: **108 identified, 84 downloaded, 24 synchronised, 0 errors** (a partial device mapping — only one LED type mapped — accounts for the difference between identified and synchronised); the run's own `Download & Sync` oplog row logged `Success`, immediately followed by an `Email Notification` oplog row logged **`Success` — "Notification sent to wtt-naiteam@worldtabletennis.com, vatsan@worldtabletennis.com."** | Pass |
+| TC-L04 | **Owner confirmed receipt**: the email arrived at both real addresses with the expected Section 23 content (event name, counts, status) | Pass — confirmed by the owner, 23/09/26 |
+
+The real Azure resources touched are the owner's own (`rgsportspresentationsource` resource group); nothing was created or changed in the web application's own storage or email configuration — only a new, additional sender identity was added to the already-existing, already-verified email domain. The real connection string was never written to any file in this repository (entered only into the live-check's own scratch database, exactly as an operator would through the Settings page); the scratch database and driver scripts were deleted after the check.
 
 ## Test cases — automated
 
@@ -55,8 +64,9 @@ Once supplied, a live check (real Download & Sync against Event 1000, real email
 | TC-A11 | **A broken notifier never breaks the run:** the job's own on-screen summary ("Downloaded N file(s)…", "Synchronised N file(s)…") is unchanged even when the notification step itself raises | Pass |
 | TC-A12 | **Read-only-Azure-Storage AST guard (`tests/test_storage.py`), re-verified:** still passes with the scope explicitly widened to `email_notify.py` for the unrelated Communication Services import; storage.py itself is untouched | Pass |
 | TC-A13 | **Independent-review regression tests (6):** a send still running when the wait times out is logged `Failed`, never `Success` (S-65); a confirmed send still reports `Success`; enabling notifications with no connection string ever saved (new or existing) is refused with a plain message (S-66); enabling without retyping an *already-saved* connection string still works; `email_notify.py`'s own Azure imports never stray beyond `azure.communication.`/`azure.core.` (S-67); the real (non-faked) ACS client construction path builds offline with bounded timeouts (S-68) | Pass |
+| TC-A14 | **Multiple comma-separated recipients (owner request, 5 tests):** split/validated/normalised (`"a@x.com, b@y.com"` → each address checked individually); one bad address in the list refuses the whole save, nothing partially saved; a secret-shaped address in the list is refused without being echoed back in the error message; more than 20 recipients refused; a send to multiple recipients addresses all of them in one message and logs all of them in the oplog row | Pass |
 
-`.\.venv\Scripts\python -m pytest -q` → **1465 passed, 14 skipped** (the skipped are the live-Azure-**Storage** tests from earlier phases, which need `--live`; there is no live-ACS test yet — see "Live validation" above).
+`.\.venv\Scripts\python -m pytest -q` → **1470 passed, 14 skipped** (the skipped are the live-Azure-**Storage** tests from earlier phases, which need `--live`; TC-L01–L04 above are the live-ACS check, run once against the real resource, not part of the repeatable automated suite).
 
 ## Rendered-page check
 
@@ -68,7 +78,7 @@ Once supplied, a live check (real Download & Sync against Event 1000, real email
 
 | ID | Description | Severity | Status |
 |---|---|---|---|
-| F-72 | No live validation against a real Azure Communication Services resource yet — see "Live validation" above. | Info | **Needs the owner's real ACS connection details before go-ahead** |
+| F-72 | Closed 23/09/26 — live validation completed against the real Azure Communication Services resource, real Event 1000, and two real recipients; the owner confirmed receipt. See "Live validation" above. | Info | Closed |
 | F-73 | The notification does not yet fire after a *scheduled* run, because scheduled execution (Phase 12) does not exist yet. The hook point (`run_job`) is shared, so no further change should be needed once Phase 12 arrives. | Info | Carried to Phase 12 |
 | F-74 | A Download-only or Sync-only partial run (the Change Log page's separate actions) never sends a notification, by design — only a full Download & Sync does. | Info | Accepted, tell me if wrong |
 | F-75 | The job's on-screen "running" state is held for up to ~58 seconds (the sum of the connect/read/poll timeouts) after the run's own work and its own log row are already complete, while the notification attempt runs. A deliberate tradeoff (independent review note) — the timeouts are kept short specifically so an offline venue is not held for minutes, and BRD Section 31 places the email as the last workflow step. | Low | Accepted |
@@ -87,4 +97,4 @@ Two informational notes also closed: an AST-guard comment overstated a narrower 
 | Role | Name | Date | Outcome |
 |---|---|---|---|
 | Independent Solution Architect review | Independent review agent (fresh context) | 23/09/26 | **Approved with notes after fixes** — see above. |
-| User (Vatsan) go-ahead | Vatsan | pending | pending — also needs the real ACS connection string, verified sender address and a test recipient (see "Live validation") |
+| User (Vatsan) go-ahead | Vatsan | pending | Live validation complete and email receipt confirmed by the owner (23/09/26) — formal go-ahead to merge pending |

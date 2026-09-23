@@ -594,13 +594,30 @@ def load_email_secret(conn: sqlite3.Connection) -> EmailCredentials:
                             _get(conn, KEY_EMAIL_SENDER), _get(conn, KEY_EMAIL_CONNECTION))
 
 
+_MAX_RECIPIENTS = 20
+
+
+def split_email_recipients(text: str) -> list[str]:
+    """The stored/typed recipient value -> its individual addresses (comma-separated; blank entries
+    from stray commas or spacing are dropped)."""
+    return [part.strip() for part in (text or "").split(",") if part.strip()]
+
+
 def validate_email_recipient(text: str) -> str:
-    value = (text or "").strip()
-    if not value:
+    """One or more addresses, comma-separated (owner request, 23/09/26 - a run can notify more than
+    one IT recipient). Stored/returned normalised as 'a@x.com, b@y.com'; every address is validated
+    individually, so one bad address in the list refuses the whole save."""
+    addresses = split_email_recipients(text)
+    if not addresses:
         return ""
-    if looks_like_secret(value) or len(value) > 200 or not _EMAIL_RE.match(value):
-        raise SettingsError("Enter a valid email address, or leave it blank.")
-    return value
+    if len(addresses) > _MAX_RECIPIENTS:
+        raise SettingsError(f"Enter no more than {_MAX_RECIPIENTS} recipient addresses.")
+    for address in addresses:
+        if looks_like_secret(address) or len(address) > 200 or not _EMAIL_RE.match(address):
+            # Never echo `address` back here: a secret-shaped paste is exactly the case this guards
+            # against, and a message repeating it would leak it right back onto the page/exception log.
+            raise SettingsError("Enter one or more valid email addresses, separated by commas.")
+    return ", ".join(addresses)
 
 
 def validate_email_sender(text: str) -> str:

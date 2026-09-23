@@ -32,6 +32,58 @@ def test_sender_address_is_validated_and_required_together_with_the_recipient(cf
     conn.close()
 
 
+# --- multiple comma-separated recipients (owner request, 23/09/26) -----------------------------------------------------
+
+def test_multiple_recipients_are_split_validated_and_normalised(cfg):
+    init_db(cfg.db_path)
+    conn = connect(cfg.db_path)
+    cs.save_email(conn, True, " a@example.com ,b@example.com,, c@example.com", "sender@example.com",
+                  "endpoint=https://x.communication.azure.com/;accesskey=" + "A" * 40)
+    assert cs.load_email(conn).recipient == "a@example.com, b@example.com, c@example.com"
+    assert cs.split_email_recipients(cs.load_email(conn).recipient) == ["a@example.com", "b@example.com", "c@example.com"]
+    conn.close()
+
+
+def test_one_bad_address_in_the_recipient_list_refuses_the_whole_save(cfg):
+    init_db(cfg.db_path)
+    conn = connect(cfg.db_path)
+    with pytest.raises(cs.SettingsError):
+        cs.save_email(conn, False, "a@example.com, not-an-email", "", "")
+    assert cs.load_email(conn).recipient == ""                     # nothing partially saved
+    conn.close()
+
+
+def test_a_secret_shaped_recipient_in_a_list_is_refused_without_being_echoed_back(cfg):
+    init_db(cfg.db_path)
+    conn = connect(cfg.db_path)
+    with pytest.raises(cs.SettingsError) as exc:
+        cs.save_email(conn, False, "a@example.com, sk_live_" + "A1b2C3d4" * 6, "", "")
+    assert "sk_live_" not in str(exc.value)
+    conn.close()
+
+
+def test_too_many_recipients_is_refused(cfg):
+    init_db(cfg.db_path)
+    conn = connect(cfg.db_path)
+    many = ", ".join(f"user{i}@example.com" for i in range(25))
+    with pytest.raises(cs.SettingsError):
+        cs.save_email(conn, False, many, "", "")
+    conn.close()
+
+
+def test_a_send_to_multiple_recipients_addresses_them_all_and_logs_them_all(cfg):
+    init_db(cfg.db_path)
+    conn = connect(cfg.db_path)
+    cs.save_email(conn, True, "a@example.com, b@example.com", "sender@example.com",
+                  "endpoint=https://x.communication.azure.com/;accesskey=" + "A" * 40)
+    fake = FakeEmailClient()
+    email_notify.notify(conn, _outcome(), client_factory=lambda _cs: fake)
+    assert fake.sent[0]["recipients"]["to"] == [{"address": "a@example.com"}, {"address": "b@example.com"}]
+    rows = db_rows(cfg, "SELECT message FROM operation_log WHERE operation = 'Email Notification'")
+    assert rows[0]["message"] == "Notification sent to a@example.com, b@example.com."
+    conn.close()
+
+
 # --- connection string parsing (never the SDK's own from_connection_string) -------------------------------------------
 
 def test_connection_string_is_parsed_by_hand_order_and_case_insensitive():

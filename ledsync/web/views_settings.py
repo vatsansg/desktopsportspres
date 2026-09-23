@@ -219,7 +219,7 @@ def email():
 def email_post():
     db = get_db()
     enabled = request.form.get("enabled") == "1"
-    recipient_typed = request.form.get("recipient", "")[:200]
+    recipient_typed = request.form.get("recipient", "")[:2000]
     sender_typed = request.form.get("sender", "")[:200]
     connection_typed = request.form.get("connection_string", "")[:2000]
     try:

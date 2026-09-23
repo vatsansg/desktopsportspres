@@ -107,11 +107,11 @@ def _content(outcome: RunOutcome) -> tuple[str, str]:
     return subject, body
 
 
-def _send(client, sender: str, recipient: str, outcome: RunOutcome) -> None:
+def _send(client, sender: str, recipients: list[str], outcome: RunOutcome) -> None:
     subject, body = _content(outcome)
     message = {
         "senderAddress": sender,
-        "recipients": {"to": [{"address": recipient}]},
+        "recipients": {"to": [{"address": address} for address in recipients]},
         "content": {"subject": subject, "plainText": body},
     }
     try:
@@ -137,10 +137,11 @@ def notify(conn: sqlite3.Connection, outcome: RunOutcome, *, client_factory=None
         oplog.record(conn, OPERATION, SKIPPED,
                      "Notification skipped — email settings are incomplete.", outcome.event_id)
         return
+    recipients = cloud_settings.split_email_recipients(creds.recipient)
     factory = client_factory or _default_client
     try:
         client = factory(creds.connection_string)
-        _send(client, creds.sender, creds.recipient, outcome)
+        _send(client, creds.sender, recipients, outcome)
     except NotifyError as err:
         if err.connectivity:
             oplog.record(conn, OPERATION, SKIPPED, "Notification skipped — no connectivity.", outcome.event_id)
@@ -151,4 +152,4 @@ def notify(conn: sqlite3.Connection, outcome: RunOutcome, *, client_factory=None
         log.exception("Unexpected error sending the completion email")
         oplog.record(conn, OPERATION, FAILED, "Notification failed: an unexpected problem occurred.", outcome.event_id)
         return
-    oplog.record(conn, OPERATION, SENT, f"Notification sent to {creds.recipient}.", outcome.event_id)
+    oplog.record(conn, OPERATION, SENT, f"Notification sent to {', '.join(recipients)}.", outcome.event_id)

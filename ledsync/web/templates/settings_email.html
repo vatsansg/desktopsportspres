@@ -26,10 +26,10 @@
       <p class="hint">Turning this on needs a recipient and a sender address below.</p>
     </div>
     <div class="field">
-      <label for="recipient">IT notification email address</label>
-      <input id="recipient" name="recipient" type="email" value="{{ recipient_typed }}" maxlength="200" autocomplete="off"
+      <label for="recipient">IT notification email address(es)</label>
+      <input id="recipient" name="recipient" type="email" multiple value="{{ recipient_typed }}" maxlength="2000" autocomplete="off"
              spellcheck="false" {% if not error %}autofocus{% endif %} aria-describedby="{% if error %}form-error {% endif %}recipient-hint">
-      <p id="recipient-hint" class="hint">Where the completion summary is sent.</p>
+      <p id="recipient-hint" class="hint">Where the completion summary is sent. One address, or several separated by commas.</p>
     </div>
     <div class="field">
       <label for="sender">Sender address</label>
