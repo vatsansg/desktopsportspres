@@ -56,7 +56,9 @@ def _invoke(args: list[str], runner=None):
         raise SchedulerError("Could not run Windows Task Scheduler (schtasks.exe).") from None
 
 
-def _task_xml(username: str, days: tuple, time_value: str, working_dir: Path) -> str:
+def _task_xml(username: str, days: tuple, time_value: str, working_dir: Path, data_dir: Path) -> str:
+    if not days:
+        raise SchedulerError("At least one day is needed to register the scheduled task.")
     hour, minute = time_value.split(":")
     anchor = datetime.now().strftime("%Y-%m-%d")
     days_xml = "".join(f"<{_DAY_ELEMENT[d]} />" for d in days if d in _DAY_ELEMENT)
@@ -98,7 +100,12 @@ def _task_xml(username: str, days: tuple, time_value: str, working_dir: Path) ->
         '  <Actions Context="Author">\n'
         "    <Exec>\n"
         f"      <Command>{escape(sys.executable)}</Command>\n"
-        "      <Arguments>-m ledsync.scheduled_run</Arguments>\n"
+        # --data-dir is baked in explicitly (independent review, Phase 12) rather than left to
+        # scheduled_run.py's own default resolution, which is scoped to whichever Windows account
+        # actually runs the Task - not necessarily the account that registered it here. Without this,
+        # a schedule registered to run as a dedicated/different account (exactly what Addendum A 39.6
+        # exists to allow) would silently find an empty data folder and report "Success" forever.
+        f'      <Arguments>-m ledsync.scheduled_run --data-dir "{escape(str(data_dir))}"</Arguments>\n'
         f"      <WorkingDirectory>{escape(str(working_dir))}</WorkingDirectory>\n"
         "    </Exec>\n"
         "  </Actions>\n"
@@ -106,10 +113,13 @@ def _task_xml(username: str, days: tuple, time_value: str, working_dir: Path) ->
     )
 
 
-def register(username: str, password: str, days: tuple, time_value: str, working_dir: Path, *, runner=None) -> None:
+def register(username: str, password: str, days: tuple, time_value: str, working_dir: Path, data_dir: Path, *,
+            runner=None) -> None:
     """Create or update the Task Scheduler entry. Raises SchedulerError (a plain, safe message) on
-    failure; the caller decides what that means for the saved settings."""
-    xml = _task_xml(username, days, time_value, working_dir)
+    failure; the caller decides what that means for the saved settings. `data_dir` is THIS session's
+    own real application data folder - baked into the Task so the scheduled run always finds the
+    venue's actual events/settings, regardless of which Windows account ends up running the Task."""
+    xml = _task_xml(username, days, time_value, working_dir, data_dir)
     with tempfile.NamedTemporaryFile("w", suffix=".xml", delete=False, encoding="utf-16") as fh:
         fh.write(xml)
         xml_path = Path(fh.name)

@@ -216,19 +216,34 @@ def scheduling_post():
 
     # The real Task Scheduler entry is registered/removed BEFORE the settings are saved: a bad account
     # or password must refuse the whole save, exactly like every other validation failure in this
-    # application - never leave the saved settings claiming "enabled" when Windows disagrees.
+    # application - never leave the saved settings claiming "enabled" when Windows disagrees. (Review
+    # fix: this applied to register() but not unregister() - both are now guarded the same way.)
+    cfg = current_app.config["LEDSYNC"]
     if enabled:
         try:
             scheduler.register(username_value, password, tuple(days_value.split(",")), time_value,
-                               app_config.PROJECT_ROOT)
+                               app_config.PROJECT_ROOT, cfg.data_dir)
         except scheduler.SchedulerError as err:
             return refused(str(err))
     else:
-        scheduler.unregister()
+        try:
+            scheduler.unregister()
+        except scheduler.SchedulerError as err:
+            return refused(str(err))
 
     try:
         changed = cs.save_schedule(db, enabled, days, time_typed, username_typed)
     except cs.SettingsError as err:
+        # Review fix: the Task Scheduler side already changed (registered/removed) above, but the
+        # database write itself just failed - a genuine SQLite error, not a validation problem. Best
+        # effort to put the real Task Scheduler state back the way it was before this request, so the
+        # two never disagree; this can only fail if Task Scheduler itself is now also unreachable, in
+        # which case the operator already sees a clear error either way.
+        if enabled:
+            try:
+                scheduler.unregister()
+            except scheduler.SchedulerError:
+                pass
         return refused(str(err))
     flash("Scheduling settings saved." if changed else "Nothing changed \u2014 the settings were already saved.",
           "success" if changed else "info")

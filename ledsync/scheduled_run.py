@@ -18,6 +18,7 @@ otherwise fire a second occurrence before a slow first one has finished).
 
 import logging
 import sys
+from pathlib import Path
 
 from . import APP_NAME, __version__, config, logging_setup
 from .db import connect, init_db
@@ -91,8 +92,26 @@ def _run(cfg) -> int:
     return 0
 
 
+def _load_config(argv: list[str] | None) -> config.Config:
+    """--data-dir, when given, is authoritative and bypasses config.load()'s own %LOCALAPPDATA%
+    resolution entirely (independent review, Phase 12): that resolution is scoped to whichever
+    Windows account is currently running - exactly the account this process may NOT share with the
+    interactive session that registered the schedule (Addendum A 39.6 lets the operator choose a
+    dedicated, unattended account on purpose). services/scheduler.py always bakes the registering
+    session's own real data folder into the Task's arguments, so a scheduled run finds the venue's
+    actual events/settings regardless of which account Windows Task Scheduler runs it as."""
+    import argparse
+    parser = argparse.ArgumentParser(prog="ledsync.scheduled_run")
+    parser.add_argument("--data-dir", metavar="PATH", default=None,
+                        help="The application data folder to use (overrides the usual per-account default).")
+    args = parser.parse_args(argv)
+    if args.data_dir:
+        return config.Config(data_dir=Path(args.data_dir))
+    return config.load()
+
+
 def main(argv: list[str] | None = None) -> int:
-    cfg = config.load()
+    cfg = _load_config(argv)
     log_path = logging_setup.setup_logging(cfg.data_dir)
     log.info("Scheduled run starting (%s v%s, data dir: %s)", APP_NAME, __version__, cfg.data_dir)
     if log_path:

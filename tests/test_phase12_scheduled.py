@@ -4,6 +4,7 @@ Scheduling page's new Windows-account fields."""
 
 import subprocess
 import sys
+from pathlib import Path
 
 import pytest
 from conftest import csrf_from, db_rows
@@ -49,7 +50,7 @@ def test_the_lock_file_is_created_automatically(cfg):
 # --- Task Scheduler XML / registration (services/scheduler.py) -----------------------------------------------------
 
 def test_task_xml_has_the_right_days_time_command_and_escapes_the_username():
-    xml = scheduler._task_xml("DOMAIN\\a&b<user>", ("Mon", "Wed", "Fri"), "02:30", "C:\\app")
+    xml = scheduler._task_xml("DOMAIN\\a&b<user>", ("Mon", "Wed", "Fri"), "02:30", "C:\\app", "C:\\data")
     assert "<Monday />" in xml and "<Wednesday />" in xml and "<Friday />" in xml
     assert "<Tuesday />" not in xml and "<Sunday />" not in xml
     assert "T02:30:00" in xml
@@ -57,6 +58,7 @@ def test_task_xml_has_the_right_days_time_command_and_escapes_the_username():
     assert "<LogonType>Password</LogonType>" in xml                    # owner decision: works with nobody logged in
     assert sys.executable in xml
     assert "-m ledsync.scheduled_run" in xml
+    assert '--data-dir "C:\\data"' in xml                              # review fix: baked in, account-independent
     assert "DOMAIN\\a&amp;b&lt;user&gt;" in xml                        # XML-escaped, not raw
     assert "<user>" not in xml and "a&b" not in xml
 
@@ -73,7 +75,7 @@ class FakeRunner:
 
 def test_register_calls_schtasks_create_with_the_expected_arguments():
     fake = FakeRunner()
-    scheduler.register("me", "hunter2", ("Mon",), "02:30", "C:\\app", runner=fake)
+    scheduler.register("me", "hunter2", ("Mon",), "02:30", "C:\\app", "C:\\data", runner=fake)
     assert len(fake.calls) == 1
     args = fake.calls[0]
     assert args[:3] == ["schtasks", "/Create", "/TN"]
@@ -89,7 +91,7 @@ def test_register_calls_schtasks_create_with_the_expected_arguments():
 def test_register_raises_on_a_nonzero_return_code_without_leaking_schtasks_output():
     fake = FakeRunner(returncode=1)
     with pytest.raises(scheduler.SchedulerError) as exc:
-        scheduler.register("me", "hunter2", ("Mon",), "02:30", "C:\\app", runner=fake)
+        scheduler.register("me", "hunter2", ("Mon",), "02:30", "C:\\app", "C:\\data", runner=fake)
     assert "hunter2" not in str(exc.value) and "secret-ish output" not in str(exc.value)
 
 
@@ -171,6 +173,41 @@ def test_disabling_the_schedule_removes_the_task(logged_in, monkeypatch):
     assert len(calls) == 1
 
 
+def test_a_failed_unregister_is_refused_and_logged_not_silently_500d(logged_in, monkeypatch):
+    """Review fix: unregister() is now guarded the same way register() always was - a SchedulerError
+    here must surface as an ordinary refused save, not an uncaught exception / generic error page."""
+    def boom(**kw):
+        raise scheduler.SchedulerError("Could not remove the scheduled task.")
+    monkeypatch.setattr(scheduler, "unregister", boom)
+    resp = logged_in.post("/settings/scheduling", data={
+        "csrf_token": tok(logged_in, "/settings/scheduling"), "time": "", "username": "",
+    })
+    assert resp.status_code == 400
+    assert "Could not remove" in text_of(resp.get_data(as_text=True))
+
+
+def test_a_database_failure_after_a_successful_registration_rolls_back_the_task(logged_in, monkeypatch):
+    """Review fix: if Task Scheduler registration succeeds but the settings save itself then fails,
+    the real Task Scheduler entry must not be left registered while the database disagrees."""
+    register_calls, unregister_calls = [], []
+    monkeypatch.setattr(scheduler, "register", lambda *a, **kw: register_calls.append((a, kw)))
+    monkeypatch.setattr(scheduler, "unregister", lambda **kw: unregister_calls.append(kw))
+
+    from ledsync.services import settings as cs
+
+    def boom(*a, **kw):
+        raise cs.SettingsError("The settings could not be saved. Try again.")
+    monkeypatch.setattr(cs, "save_schedule", boom)
+
+    resp = logged_in.post("/settings/scheduling", data={
+        "csrf_token": tok(logged_in, "/settings/scheduling"), "enabled": "1", "days": ["Mon"],
+        "time": "03:15", "username": "DOMAIN\\op", "password": "hunter2",
+    })
+    assert resp.status_code == 400
+    assert len(register_calls) == 1                                   # it did try to register first
+    assert len(unregister_calls) == 1                                  # ... then rolled it back on the DB failure
+
+
 def test_the_page_shows_whether_the_task_is_actually_registered(logged_in, monkeypatch):
     monkeypatch.setattr(scheduler, "is_registered", lambda **kw: True)
     assert "Registered" in logged_in.get("/settings/scheduling").get_data(as_text=True)
@@ -184,6 +221,32 @@ def test_scheduled_run_never_imports_the_ui_toolkit():
     code = "import sys, ledsync.scheduled_run; print('webview' in sys.modules)"
     out = subprocess.run([sys.executable, "-c", code], capture_output=True, text=True, check=True)
     assert out.stdout.strip() == "False"
+
+
+def test_data_dir_argument_is_authoritative_regardless_of_the_running_account(cfg, monkeypatch):
+    """Independent review finding (Blocker): a scheduled run's usual %LOCALAPPDATA%-based folder
+    resolution is scoped to whichever Windows account actually runs the Task - not necessarily the
+    account that registered it (Addendum A 39.6 lets the operator choose a dedicated account on
+    purpose). --data-dir must override that resolution entirely, so the same venue data is found no
+    matter which account Task Scheduler runs the Task as."""
+    from ledsync import scheduled_run
+    monkeypatch.delenv("LEDSYNC_DATA_DIR", raising=False)              # prove it does NOT rely on the env var
+    result = scheduled_run._load_config(["--data-dir", str(cfg.data_dir)])
+    assert result.data_dir == cfg.data_dir
+
+
+def test_register_bakes_the_registering_sessions_data_dir_into_the_task(logged_in, monkeypatch, cfg):
+    """The Settings page must pass ITS OWN real data folder to scheduler.register(), not rely on the
+    scheduled process resolving one for itself later."""
+    calls = []
+    monkeypatch.setattr(scheduler, "register", lambda *a, **kw: calls.append(a))
+    logged_in.post("/settings/scheduling", data={
+        "csrf_token": tok(logged_in, "/settings/scheduling"), "enabled": "1", "days": ["Mon"],
+        "time": "03:15", "username": "DOMAIN\\op", "password": "hunter2",
+    })
+    assert len(calls) == 1
+    positional = calls[0]
+    assert Path(positional[-1]) == cfg.data_dir                        # data_dir is the last positional arg
 
 
 @pytest.fixture
