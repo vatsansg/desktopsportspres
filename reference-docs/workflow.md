@@ -275,8 +275,28 @@ Status values: `Not started` / `In progress` / `Awaiting user go-ahead` / `Compl
   6. **F-76 / S-69, open, carried to Phase 12:** in the owner's own venue-machine environment (not the development machine), a Download & Sync completed successfully but the notification failed with an exception whose type name is literally `Error` — not reproduced on the development machine with the same real credentials, and not yet root-caused (the full traceback in that machine's `<data dir>\logs\ledsync.log` was not retrieved). Does not affect the Download & Sync operation's own safety or correctness — every run there completed and logged correctly regardless. Owner asked to proceed and revisit this when Phase 12 (scheduled runs, which depend on the same notifier) begins, rather than block on it now.
 
 ## Phase 12 — Scheduled Operation
-- **Status:** Not started
-- **Completed on:** / **What was built:** / **QA Test Case doc:** / **Security Checklist:** / **Deviations:**
+- **Status:** In progress (built, tested and independently reviewed 23 September 2026 — the review rejected the first pass on a real blocker, fixed the same day; blocked on the owner's real Task Scheduler registration and an unattended-run confirmation for go-ahead; not yet merged to `main`)
+- **Includes:** Step 12.1 — scheduling configuration (storage already built in Phase 10); Step 12.2 — Windows Task Scheduler integration, running the existing Download & Sync flow for every registered event, followed by the Phase 11 email notification.
+- **Completed on:** —
+- **What was built:**
+  - **Addendum A 39.6 resolved by the owner (23 Sep 2026): a scheduled run must work with nobody logged into Windows.** The single biggest design driver of the phase — it rules out a simpler "only when logged on" model and requires a genuinely headless entry point plus a real, Windows-stored account/password for Task Scheduler's `LogonType=Password`.
+  - `services/singleinstance.py`: an OS-level advisory file lock (`msvcrt.locking`), closing the "single-instance lock" item carried since Phase 0/1 (and Phase 5's F-32, "unattended runs in Phase 12"). Both `main.py` (interactive) and `scheduled_run.py` (headless) take it before touching the database, so the two can never collide.
+  - `services/scheduler.py`: builds a Task Scheduler XML definition and registers/removes/queries it via `schtasks.exe`. The Windows account password is used once, passed to `schtasks /RP`, and never stored by this application anywhere — Windows' own credential store keeps it.
+  - `ledsync/scheduled_run.py`: the headless entry point (`python -m ledsync.scheduled_run`) — no pywebview/Flask import at all (verified by a real subprocess test). Runs the existing, unchanged `downloads.run_job` for every registered event in turn; one event failing never stops the rest.
+  - **Settings → Scheduling**: a Windows account field (auto-filled with the signed-in operator's own account) and a password field required every save while enabled (nothing is stored, so nothing can be "kept unchanged"). `scheduler.register()`/`unregister()` runs *before* the settings are saved, so a bad account/password refuses the whole save rather than leaving the database and the real Task Scheduler entry disagreeing.
+  - 23 new tests (`tests/test_phase12_scheduled.py`) plus an autouse `conftest.py` fixture guaranteeing no test anywhere can shell out to the real Windows Task Scheduler.
+  - 1493 automated tests pass (14 skipped — live-Azure-Storage tests from earlier phases; there is no live-Task-Scheduler test — see Deviations).
+- **QA Test Case doc:** `docs/QA_Desktop_Phase12_ScheduledOperation.md`
+- **Security Checklist:** `docs/Security_Desktop_Phase12_ScheduledOperation.md`
+- **Independent architect review:** **Rejected on first pass, then Approved with notes after fixes.** One real blocker (S-72): the scheduled process resolved its data folder via the normal per-Windows-account `%LOCALAPPDATA%` path — scoped to whichever account actually runs the Task, not necessarily the account that registered it. Since Addendum A 39.6 exists precisely so the schedule can run as a dedicated account different from the interactive operator, that entirely reasonable configuration would have silently pointed the scheduled run at an *empty* data folder, logging "Success" forever while nothing was ever actually synced. Fixed by baking the registering session's own real data folder into the Task's `--data-dir` argument at registration time. Two further findings fixed: the disable path's `unregister()` call was unguarded, unlike `register()` (a transient schtasks failure there would have surfaced as a generic error page with no audit row — now guarded identically); and a database-save failure occurring *after* a successful registration could leave Windows registered while the database disagreed (now a best-effort compensating `unregister()`). Confirmed sound: the Windows account password never leaks on any traced path (form → `schtasks /RP` only — never the database, a log line, the temp XML file, or the page even on a failed save); the cross-process lock has no TOCTOU gap and releases correctly on an exception; the headless entry point's full import chain is genuinely free of any GUI/COM/desktop-session dependency; the Task Scheduler XML is structurally sound with every field correctly XML-escaped. Fixes verified by 4 new tests; **not** re-reviewed.
+- **Deviations / owner decisions:**
+  1. **A scheduled run must work with nobody logged into Windows** (Addendum A 39.6, previously open, resolved by the owner, 23 Sep 2026).
+  2. **A scheduled run processes every registered event** — not a per-event opt-in/opt-out.
+  3. **The application itself (not the not-yet-built Phase 13 installer) registers the real Task Scheduler entry**, via `schtasks.exe`, the moment Settings → Scheduling is saved. Phase 13 can take this over later without disturbing an already-configured schedule.
+  4. **A missed occurrence catches up as soon as the computer is next on** (Task Scheduler's `StartWhenAvailable`), rather than being skipped.
+  5. **The scheduled time is this computer's own local clock**, not UTC — matches how Windows Task Scheduler itself works, deliberately different from Phase 10's UTC-based per-event Timestamp Cut-off (which compares against cloud timestamps).
+  6. **No live validation against the real Windows Task Scheduler yet, deliberately** — it needs the operator's own real Windows account password, which must never be typed into this conversation or any file. The QA doc includes a step-by-step procedure for the owner to run directly in the app, including confirming the real "works with nobody signed in" behaviour by signing out of Windows entirely before the scheduled time.
+  7. **Not yet merged to `main`** — pending the item above, then the owner's go-ahead.
 
 ## Phase 13 — Installer and Upgrade Handling
 - **Status:** Not started
@@ -304,6 +324,6 @@ Status values: `Not started` / `In progress` / `Awaiting user go-ahead` / `Compl
 | 9 | Complete | 22 Sep 2026 | `3b298d0`, `0746e68`, `5d9bef3` (merge `1e58e0d`) |
 | 10 | Complete | 23 Sep 2026 | `e48bb8b`, `7f0261c` (merge `632576b`) |
 | 11 | Complete | 23 Sep 2026 | `8df2ca4`, `ee806d3`, `09a49b1`, `40a2a8c`, `0f69b5c` (merge `ae3d470`) |
-| 12 | Not started | | |
+| 12 | In progress | | (not yet merged — blocked on owner Task Scheduler live validation) |
 | 13 | Not started | | |
 | 14 | Not started | | |
