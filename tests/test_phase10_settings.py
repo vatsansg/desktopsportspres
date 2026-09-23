@@ -83,20 +83,23 @@ def test_scheduling_settings_validate_order_and_refuse_enabling_without_day_or_t
 def test_email_settings_validate_recipient_and_never_echo_the_connection_string(cfg):
     init_db(cfg.db_path)
     conn = connect(cfg.db_path)
-    assert cs.load_email(conn) == cs.EmailSettings(False, "", False)
+    assert cs.load_email(conn) == cs.EmailSettings(False, "", "", False)
     with pytest.raises(cs.SettingsError):
-        cs.save_email(conn, True, "", "")                        # enabling needs a recipient
-    changed = cs.save_email(conn, True, "it@example.com", "endpoint=https://x.communication.azure.com/;accesskey=" + "A" * 40)
-    assert changed == ["enabled", "recipient", "connection string"]
+        cs.save_email(conn, True, "", "", "")                    # enabling needs a recipient
+    with pytest.raises(cs.SettingsError):
+        cs.save_email(conn, True, "it@example.com", "", "")      # ... and a sender
+    changed = cs.save_email(conn, True, "it@example.com", "sender@example.com",
+                            "endpoint=https://x.communication.azure.com/;accesskey=" + "A" * 40)
+    assert changed == ["enabled", "recipient", "sender", "connection string"]
     saved = cs.load_email(conn)
-    assert saved.enabled and saved.recipient == "it@example.com" and saved.has_connection
-    assert cs.save_email(conn, True, "it@example.com", "") == []                     # blank keeps the existing connection
+    assert saved.enabled and saved.recipient == "it@example.com" and saved.sender == "sender@example.com" and saved.has_connection
+    assert cs.save_email(conn, True, "it@example.com", "sender@example.com", "") == []  # blank keeps the existing connection
     assert cs.load_email(conn).has_connection
     for bad_recipient in ("not-an-email", "a" * 40 + "@" + "b" * 40 + "@x.com"):
         with pytest.raises(cs.SettingsError):
-            cs.save_email(conn, False, bad_recipient, "")
+            cs.save_email(conn, False, bad_recipient, "", "")
     with pytest.raises(cs.SettingsError):
-        cs.save_email(conn, False, "", "short")                  # too short to be a real connection string
+        cs.save_email(conn, False, "", "", "short")               # too short to be a real connection string
     conn.close()
 
 
@@ -104,14 +107,14 @@ def test_a_key_shaped_value_pasted_into_the_recipient_box_is_refused(cfg):
     init_db(cfg.db_path)
     conn = connect(cfg.db_path)
     with pytest.raises(cs.SettingsError):
-        cs.save_email(conn, False, "sk_live_" + "A1b2C3d4" * 6, "")
+        cs.save_email(conn, False, "sk_live_" + "A1b2C3d4" * 6, "", "")
     conn.close()
 
 
 def test_owned_keys_cover_every_new_setting():
     for key in (cs.KEY_RETRY_COUNT, cs.KEY_RETRY_DELAY, cs.KEY_LOG_RETENTION, cs.KEY_SCHEDULE_ENABLED,
                cs.KEY_SCHEDULE_DAYS, cs.KEY_SCHEDULE_TIME, cs.KEY_EMAIL_ENABLED, cs.KEY_EMAIL_RECIPIENT,
-               cs.KEY_EMAIL_CONNECTION):
+               cs.KEY_EMAIL_SENDER, cs.KEY_EMAIL_CONNECTION):
         assert key in cs.OWNED_KEYS
 
 
@@ -206,6 +209,7 @@ def test_email_settings_page_saves_and_never_echoes_the_connection_string(logged
     secret = "endpoint=https://x.communication.azure.com/;accesskey=" + "B" * 40
     out = text_of(logged_in.post("/settings/email", data={"csrf_token": tok2(logged_in, "/settings/email"),
                                                            "enabled": "1", "recipient": "it@example.com",
+                                                           "sender": "sender@example.com",
                                                            "connection_string": secret}, follow_redirects=True).get_data(as_text=True))
     assert "Email settings saved." in out
     html = logged_in.get("/settings/email").get_data(as_text=True)

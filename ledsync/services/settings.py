@@ -544,17 +544,23 @@ def save_schedule(conn: sqlite3.Connection, enabled: bool, days, time_text: str)
     return changed
 
 
-# --- email settings (BRD 14/23; storage only - Phase 11 sends the notification) -------------------------------------
+# --- email settings (BRD 14/23; Phase 11 sends the notification) -----------------------------------------------------
 #
 # DEVIATION (22 Sep 2026): BRD Section 14 lists SMTP server/port/username/authentication fields, but the Desktop BRD
-# Addendum A Section 39.3 (confirmed 20 Sep 2026, before this phase) supersedes that: the email mechanism is Azure
-# Communication Services, the same service the web application uses. SMTP fields would be built only to be thrown
-# away once Phase 11 arrives, so this page stores what Phase 11 actually needs instead: the recipient, whether
-# notifications are on, and a connection string (handled exactly like the storage access key - never echoed back,
-# never logged) ready for the connection details BRD 39.3 says will be supplied when that phase starts.
+# Addendum A Section 39.3 (confirmed 20 Sep 2026, before Phase 10 started) supersedes that: the email mechanism is
+# Azure Communication Services, the same service the web application uses. SMTP fields would be built only to be
+# thrown away once Phase 11 arrives, so this page stores what Phase 11 actually needs instead: the recipient, a
+# sender address, whether notifications are on, and a connection string (handled exactly like the storage access
+# key - never echoed back, never logged).
+#
+# DEVIATION (23 Sep 2026, Phase 11): ACS requires a verified "from" address on every send - the BRD's superseded
+# SMTP-field list implied one too (a server/port/username triple has an implicit envelope sender) but Section 14's
+# post-39.3 field list did not carry one forward explicitly, and Phase 10 did not add one. Added here as "Sender
+# address" - my default; tell me if wrong. Required together with the recipient when notifications are enabled.
 
 KEY_EMAIL_ENABLED = "email_enabled"
 KEY_EMAIL_RECIPIENT = "email_recipient"
+KEY_EMAIL_SENDER = "email_sender"
 KEY_EMAIL_CONNECTION = "email_connection_string"
 _EMAIL_RE = re.compile(r"^[^@\s]+@[^@\s]+\.[^@\s]+$")     # a plain shape check, not full RFC 5322
 _CONNECTION_LENGTH = (20, 2000)
@@ -564,20 +570,62 @@ _CONNECTION_LENGTH = (20, 2000)
 class EmailSettings:
     enabled: bool
     recipient: str
+    sender: str
     has_connection: bool
 
 
 def load_email(conn: sqlite3.Connection) -> EmailSettings:
     return EmailSettings(_get(conn, KEY_EMAIL_ENABLED) == "1", _get(conn, KEY_EMAIL_RECIPIENT),
-                         bool(_get(conn, KEY_EMAIL_CONNECTION)))
+                         _get(conn, KEY_EMAIL_SENDER), bool(_get(conn, KEY_EMAIL_CONNECTION)))
+
+
+@dataclass(frozen=True)
+class EmailCredentials:
+    """Internal use only (the notifier, email_notify.py) - carries the real connection string.
+    Never pass this to a template; `load_email`/`EmailSettings` is the page-safe view."""
+    enabled: bool
+    recipient: str
+    sender: str
+    connection_string: str = field(default="", repr=False)   # never appears in a repr, log or page
+
+
+def load_email_secret(conn: sqlite3.Connection) -> EmailCredentials:
+    return EmailCredentials(_get(conn, KEY_EMAIL_ENABLED) == "1", _get(conn, KEY_EMAIL_RECIPIENT),
+                            _get(conn, KEY_EMAIL_SENDER), _get(conn, KEY_EMAIL_CONNECTION))
+
+
+_MAX_RECIPIENTS = 20
+
+
+def split_email_recipients(text: str) -> list[str]:
+    """The stored/typed recipient value -> its individual addresses (comma-separated; blank entries
+    from stray commas or spacing are dropped)."""
+    return [part.strip() for part in (text or "").split(",") if part.strip()]
 
 
 def validate_email_recipient(text: str) -> str:
+    """One or more addresses, comma-separated (owner request, 23/09/26 - a run can notify more than
+    one IT recipient). Stored/returned normalised as 'a@x.com, b@y.com'; every address is validated
+    individually, so one bad address in the list refuses the whole save."""
+    addresses = split_email_recipients(text)
+    if not addresses:
+        return ""
+    if len(addresses) > _MAX_RECIPIENTS:
+        raise SettingsError(f"Enter no more than {_MAX_RECIPIENTS} recipient addresses.")
+    for address in addresses:
+        if looks_like_secret(address) or len(address) > 200 or not _EMAIL_RE.match(address):
+            # Never echo `address` back here: a secret-shaped paste is exactly the case this guards
+            # against, and a message repeating it would leak it right back onto the page/exception log.
+            raise SettingsError("Enter one or more valid email addresses, separated by commas.")
+    return ", ".join(addresses)
+
+
+def validate_email_sender(text: str) -> str:
     value = (text or "").strip()
     if not value:
         return ""
     if looks_like_secret(value) or len(value) > 200 or not _EMAIL_RE.match(value):
-        raise SettingsError("Enter a valid email address, or leave it blank.")
+        raise SettingsError("Enter a valid sender address, or leave it blank.")
     return value
 
 
@@ -590,12 +638,18 @@ def validate_email_connection(text: str) -> str:
     return value
 
 
-def save_email(conn: sqlite3.Connection, enabled: bool, recipient_text: str, connection_text: str) -> list[str]:
+def save_email(conn: sqlite3.Connection, enabled: bool, recipient_text: str, sender_text: str,
+              connection_text: str) -> list[str]:
     """`connection_text` empty keeps the existing connection string (like the storage access key)."""
     recipient = validate_email_recipient(recipient_text)
+    sender = validate_email_sender(sender_text)
     connection = validate_email_connection(connection_text) if (connection_text or "").strip() else None
     if enabled and not recipient:
         raise SettingsError("Enter the notification email address before turning notifications on.")
+    if enabled and not sender:
+        raise SettingsError("Enter the sender address before turning notifications on.")
+    if enabled and not (connection or _get(conn, KEY_EMAIL_CONNECTION)):
+        raise SettingsError("Enter the Azure Communication Services connection string before turning notifications on.")
     enabled_value = "1" if enabled else "0"
     changed = []
     try:
@@ -605,6 +659,9 @@ def save_email(conn: sqlite3.Connection, enabled: bool, recipient_text: str, con
         if _get(conn, KEY_EMAIL_RECIPIENT) != recipient:
             _put(conn, KEY_EMAIL_RECIPIENT, recipient)
             changed.append("recipient")
+        if _get(conn, KEY_EMAIL_SENDER) != sender:
+            _put(conn, KEY_EMAIL_SENDER, sender)
+            changed.append("sender")
         if connection is not None and connection != _get(conn, KEY_EMAIL_CONNECTION):
             _put(conn, KEY_EMAIL_CONNECTION, connection)
             changed.append("connection string")
@@ -622,5 +679,5 @@ def save_email(conn: sqlite3.Connection, enabled: bool, recipient_text: str, con
 OWNED_KEYS = OWNED_KEYS | {
     KEY_RETRY_COUNT, KEY_RETRY_DELAY, KEY_LOG_RETENTION,
     KEY_SCHEDULE_ENABLED, KEY_SCHEDULE_DAYS, KEY_SCHEDULE_TIME,
-    KEY_EMAIL_ENABLED, KEY_EMAIL_RECIPIENT, KEY_EMAIL_CONNECTION,
+    KEY_EMAIL_ENABLED, KEY_EMAIL_RECIPIENT, KEY_EMAIL_SENDER, KEY_EMAIL_CONNECTION,
 }

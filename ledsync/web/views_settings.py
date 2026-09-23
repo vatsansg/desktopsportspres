@@ -197,13 +197,14 @@ def scheduling_post():
     return redirect(url_for("settings.scheduling"))
 
 
-# --- Email Settings (BRD 14/23; storage only - Phase 11 sends the notification) --------------------------------------
+# --- Email Settings (BRD 14/23; Phase 11 sends the notification) -----------------------------------------------------
 
-def _email_page(db, enabled=None, recipient_typed=None, error=None):
+def _email_page(db, enabled=None, recipient_typed=None, sender_typed=None, error=None):
     saved = cs.load_email(db)
     return render_template("settings_email.html", **_ctx(
         saved=saved, enabled=(saved.enabled if enabled is None else enabled),
         recipient_typed=cs.redact_if_secret_like(saved.recipient if recipient_typed is None else recipient_typed),
+        sender_typed=cs.redact_if_secret_like(saved.sender if sender_typed is None else sender_typed),
         error=error))
 
 
@@ -218,13 +219,14 @@ def email():
 def email_post():
     db = get_db()
     enabled = request.form.get("enabled") == "1"
-    recipient_typed = request.form.get("recipient", "")[:200]
+    recipient_typed = request.form.get("recipient", "")[:2000]
+    sender_typed = request.form.get("sender", "")[:200]
     connection_typed = request.form.get("connection_string", "")[:2000]
     try:
-        changed = cs.save_email(db, enabled, recipient_typed, connection_typed)
+        changed = cs.save_email(db, enabled, recipient_typed, sender_typed, connection_typed)
     except cs.SettingsError as err:
         exceptions.record_rejection(db, "Settings Changed", "Save Email Settings", str(err))
-        return _email_page(db, enabled, recipient_typed, str(err)), 400
+        return _email_page(db, enabled, recipient_typed, sender_typed, str(err)), 400
     flash("Email settings saved." if changed else "Nothing changed \u2014 the settings were already saved.",
           "success" if changed else "info")
     return redirect(url_for("settings.email"))
