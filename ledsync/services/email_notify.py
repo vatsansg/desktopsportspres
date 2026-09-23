@@ -119,6 +119,12 @@ def _send(client, sender: str, recipient: str, outcome: RunOutcome) -> None:
         poller.result(timeout=_POLL_TIMEOUT)
     except Exception as exc:                                   # noqa: BLE001 - mapped below
         raise _map_error(exc) from None
+    # A terminal Failed/Cancelled status raises inside result() above (caught and mapped, not reached
+    # here); a still-Running operation at the _POLL_TIMEOUT mark instead returns quietly with no
+    # exception (LROPoller.wait() simply stops waiting), which must NOT be read as a confirmed send -
+    # that would log "Notification sent" for a send that may never complete or may still fail.
+    if not poller.done():
+        raise NotifyError("Azure Communication Services did not confirm the send in time.")
 
 
 def notify(conn: sqlite3.Connection, outcome: RunOutcome, *, client_factory=None) -> None:

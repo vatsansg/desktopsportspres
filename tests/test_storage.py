@@ -276,8 +276,12 @@ def test_no_dynamic_attribute_access_that_could_hide_a_write_call():
 # read-only guarantee this whole file enforces). email_notify.py (Phase 11) imports a different Azure
 # service entirely - Communication Services, for sending the completion email - which has no read-only
 # constraint (sending an email is inherently a "write" to that unrelated service) and no access to the
-# web application's storage account; it is explicitly allowed here, and test_email_notify.py enforces
-# its own AST guard restricting IT to azure.communication.email only.
+# web application's storage account; it is explicitly allowed here. This only widens the IMPORT check
+# below - the FORBIDDEN_CALLS / PRIVATE_SDK_ATTRS guards two tests down still scan every module
+# unconditionally, email_notify.py included, so a mutating Blob-Storage method name would still be
+# caught there even inside it. test_phase11_email.py separately asserts email_notify.py's own azure
+# imports never stray beyond azure.communication./azure.core. - narrower than "any azure.*", which is
+# all this shared list can express.
 AZURE_ALLOWED_MODULES = {"storage.py", "email_notify.py"}
 
 

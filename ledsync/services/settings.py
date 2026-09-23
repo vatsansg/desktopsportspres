@@ -631,6 +631,8 @@ def save_email(conn: sqlite3.Connection, enabled: bool, recipient_text: str, sen
         raise SettingsError("Enter the notification email address before turning notifications on.")
     if enabled and not sender:
         raise SettingsError("Enter the sender address before turning notifications on.")
+    if enabled and not (connection or _get(conn, KEY_EMAIL_CONNECTION)):
+        raise SettingsError("Enter the Azure Communication Services connection string before turning notifications on.")
     enabled_value = "1" if enabled else "0"
     changed = []
     try:

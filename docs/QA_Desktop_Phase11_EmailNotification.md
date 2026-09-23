@@ -54,8 +54,9 @@ Once supplied, a live check (real Download & Sync against Event 1000, real email
 | TC-A10 | **BRD status wording:** done+0 errors → Successful; done+some errors → Successful with Exceptions; state=error → Failed; state=cancelled → Cancelled | Pass |
 | TC-A11 | **A broken notifier never breaks the run:** the job's own on-screen summary ("Downloaded N file(s)…", "Synchronised N file(s)…") is unchanged even when the notification step itself raises | Pass |
 | TC-A12 | **Read-only-Azure-Storage AST guard (`tests/test_storage.py`), re-verified:** still passes with the scope explicitly widened to `email_notify.py` for the unrelated Communication Services import; storage.py itself is untouched | Pass |
+| TC-A13 | **Independent-review regression tests (6):** a send still running when the wait times out is logged `Failed`, never `Success` (S-65); a confirmed send still reports `Success`; enabling notifications with no connection string ever saved (new or existing) is refused with a plain message (S-66); enabling without retyping an *already-saved* connection string still works; `email_notify.py`'s own Azure imports never stray beyond `azure.communication.`/`azure.core.` (S-67); the real (non-faked) ACS client construction path builds offline with bounded timeouts (S-68) | Pass |
 
-`.\.venv\Scripts\python -m pytest -q` → **1459 passed, 14 skipped** (the skipped are the live-Azure-**Storage** tests from earlier phases, which need `--live`; there is no live-ACS test yet — see "Live validation" above).
+`.\.venv\Scripts\python -m pytest -q` → **1465 passed, 14 skipped** (the skipped are the live-Azure-**Storage** tests from earlier phases, which need `--live`; there is no live-ACS test yet — see "Live validation" above).
 
 ## Rendered-page check
 
@@ -70,14 +71,20 @@ Once supplied, a live check (real Download & Sync against Event 1000, real email
 | F-72 | No live validation against a real Azure Communication Services resource yet — see "Live validation" above. | Info | **Needs the owner's real ACS connection details before go-ahead** |
 | F-73 | The notification does not yet fire after a *scheduled* run, because scheduled execution (Phase 12) does not exist yet. The hook point (`run_job`) is shared, so no further change should be needed once Phase 12 arrives. | Info | Carried to Phase 12 |
 | F-74 | A Download-only or Sync-only partial run (the Change Log page's separate actions) never sends a notification, by design — only a full Download & Sync does. | Info | Accepted, tell me if wrong |
+| F-75 | The job's on-screen "running" state is held for up to ~58 seconds (the sum of the connect/read/poll timeouts) after the run's own work and its own log row are already complete, while the notification attempt runs. A deliberate tradeoff (independent review note) — the timeouts are kept short specifically so an offline venue is not held for minutes, and BRD Section 31 places the email as the last workflow step. | Low | Accepted |
 
 ## Independent Solution Architect review
 
-*Pending — see the Security Checklist for the same entry once complete.*
+**Approved with notes after fixes** (23/09/26) — two "fix now" findings reproduced against the real, installed Azure SDK (not assumed) and fixed:
+
+- **A still-running send at the 30-second wait limit was silently logged as "sent."** `LROPoller.result(timeout=...)` returns quietly with no exception when Azure Communication Services has not yet reached a terminal state — the code only checked for an exception, so a slow-but-not-dead send (degraded connectivity, or ACS being slow) could be recorded as a confirmed success in the audit log when it might never complete or might still fail. A genuinely terminal Failed/Cancelled status was already handled correctly. Fixed: the code now also checks `poller.done()` and logs `Failed` (never `Success`) when the wait gave up before a terminal state was reached.
+- **The Settings UI could save `enabled=1` with an empty connection string** (a recipient and sender were required, but not a connection string, existing or new), leaving notifications permanently, silently non-functional — every run would log "Skipped — email settings are incomplete" forever with no error shown at save time. Fixed: enabling now also requires a connection string (an existing saved one is enough; it does not need to be retyped).
+
+Two informational notes also closed: an AST-guard comment overstated a narrower protection than actually existed (corrected, and the narrower guard it described now actually exists as a test); no test exercised the real, non-faked ACS client construction path (added, mirroring `storage.py`'s own equivalent test). Confirmed sound: exception-safety at every layer (nothing can turn a successful run into an error page), the connection string never appears on any observable surface, the notifier's own database connection is properly isolated from the run's, BRD 23 field completeness against the real progress counters, the Skipped-vs-Failed error classification, and the full-Download-&-Sync-only scoping (no double-notify, no notification for a partial run). The fixes were verified by 6 new regression tests but were **not** put through a second independent review pass.
 
 ## Sign-off
 
 | Role | Name | Date | Outcome |
 |---|---|---|---|
-| Independent Solution Architect review | Independent review agent (fresh context) | pending | pending |
+| Independent Solution Architect review | Independent review agent (fresh context) | 23/09/26 | **Approved with notes after fixes** — see above. |
 | User (Vatsan) go-ahead | Vatsan | pending | pending — also needs the real ACS connection string, verified sender address and a test recipient (see "Live validation") |
