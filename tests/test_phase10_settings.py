@@ -204,6 +204,16 @@ def test_scheduling_settings_page_shows_errors_for_a_disabled_save(logged_in):
     assert "Not registered" in html
 
 
+def test_the_connection_string_field_is_not_truncated_before_a_real_connection_string_fits(logged_in):
+    """Found live (Phase 12): the field's maxlength defaulted to 128 (sized for the Cloud Storage
+    access key alone), silently truncating a real 'endpoint=...;accesskey=...' connection string
+    (170+ characters) in the browser before it ever reached the server - every save looked
+    successful in the UI but the saved key was cut off mid-string and could never actually be used."""
+    html = logged_in.get("/settings/email").get_data(as_text=True)
+    assert 'id="connection_string"' in html
+    assert 'maxlength="2000"' in html
+
+
 def test_email_settings_page_saves_and_never_echoes_the_connection_string(logged_in):
     secret = "endpoint=https://x.communication.azure.com/;accesskey=" + "B" * 40
     out = text_of(logged_in.post("/settings/email", data={"csrf_token": tok2(logged_in, "/settings/email"),

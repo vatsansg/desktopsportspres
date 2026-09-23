@@ -659,11 +659,31 @@ def validate_email_sender(text: str) -> str:
 
 
 def validate_email_connection(text: str) -> str:
+    """Beyond a length check, actually parses 'endpoint=...;accesskey=...' (order/case insensitive,
+    like every Azure connection string - mirrors email_notify._parse_connection_string, kept as a
+    separate small implementation here rather than imported, to avoid a settings.py <-> email_notify.py
+    circular import) and confirms the access key is valid base64. A connection string with a
+    mis-copied key (most commonly: trailing '=' padding dropped) used to be accepted here and only
+    fail, cryptically, the next time a notification was actually sent (found live, Phase 12)."""
     value = (text or "").strip()
     if not value:
         return ""
     if not (_CONNECTION_LENGTH[0] <= len(value) <= _CONNECTION_LENGTH[1]):
         raise SettingsError("That does not look like an Azure Communication Services connection string.")
+    parts = {}
+    for piece in value.split(";"):
+        if "=" in piece:
+            key, _, val = piece.partition("=")
+            parts[key.strip().lower()] = val.strip()
+    endpoint, access_key = parts.get("endpoint", "").rstrip("/"), parts.get("accesskey", "")
+    if not (endpoint.startswith("https://") and access_key):
+        raise SettingsError("That does not look like an Azure Communication Services connection string "
+                            "(expected 'endpoint=https://...;accesskey=...').")
+    try:
+        base64.b64decode(access_key, validate=True)
+    except (binascii.Error, ValueError):
+        raise SettingsError("The connection string's access key is not valid - check it was copied in full, "
+                            "including any trailing '=' characters.") from None
     return value
 
 

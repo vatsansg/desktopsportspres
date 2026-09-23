@@ -317,3 +317,25 @@ def test_a_run_is_skipped_and_logged_blocked_when_another_instance_holds_the_loc
     rows = db_rows(cfg, "SELECT status, message FROM operation_log WHERE operation = 'Scheduled Run'")
     assert rows and rows[-1]["status"] == "Blocked"
     assert "already using this data folder" in rows[-1]["message"]
+
+
+# --- email connection string: mis-copied access key rejected at save time, not first send (live, Phase 12) -----------
+
+def test_a_connection_string_with_incorrectly_padded_access_key_is_refused_at_save_time(cfg):
+    """Found live: a connection string missing its key's trailing base64 '=' padding used to be
+    accepted by Settings and only fail - cryptically - the next time a notification was actually
+    sent (binascii.Error: Incorrect padding, deep inside the Azure SDK's request signing)."""
+    init_db(cfg.db_path)
+    conn = connect(cfg.db_path)
+    with pytest.raises(cs.SettingsError):
+        cs.save_email(conn, False, "", "",
+                      "endpoint=https://x.communication.azure.com/;accesskey=" + "A" * 41)   # not a multiple of 4
+    with pytest.raises(cs.SettingsError):
+        cs.save_email(conn, False, "", "", "endpoint=https://x.communication.azure.com/;accesskey=")
+    with pytest.raises(cs.SettingsError):
+        cs.save_email(conn, False, "", "", "endpoint=http://x.communication.azure.com/;accesskey=" + "A" * 40)
+    assert cs.load_email(conn).has_connection is False                # nothing bad got saved
+    changed = cs.save_email(conn, False, "", "",
+                            "endpoint=https://x.communication.azure.com/;accesskey=" + "A" * 40)
+    assert "connection string" in changed
+    conn.close()

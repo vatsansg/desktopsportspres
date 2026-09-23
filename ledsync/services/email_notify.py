@@ -120,6 +120,7 @@ def _send(client, sender: str, recipients: list[str], outcome: RunOutcome) -> No
         poller = client.begin_send(message)
         poller.result(timeout=_POLL_TIMEOUT)
     except Exception as exc:                                   # noqa: BLE001 - mapped below
+        log.exception("Sending the completion email failed")
         raise _map_error(exc) from None
     # A terminal Failed/Cancelled status raises inside result() above (caught and mapped, not reached
     # here); a still-Running operation at the _POLL_TIMEOUT mark instead returns quietly with no
