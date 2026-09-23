@@ -250,8 +250,26 @@ Status values: `Not started` / `In progress` / `Awaiting user go-ahead` / `Compl
   6. The fix above was verified by Claude (automated test + a rendered-page re-check) but did not go through a second independent architect review or a second owner pass before this go-ahead — the owner's sign-off treats it as covered.
 
 ## Phase 11 — Email Notification
-- **Status:** Not started
-- **Completed on:** / **What was built:** / **QA Test Case doc:** / **Security Checklist:** / **Deviations:**
+- **Status:** In progress (built, tested and independently reviewed 23 September 2026, with two review findings fixed the same day; blocked on the owner's real Azure Communication Services connection details for live validation and go-ahead; not yet merged to `main`)
+- **Includes:** Step 11.1 — the BRD Section 23 completion email, sent via Azure Communication Services (Addendum A Section 39.3), after every full Download & Sync run.
+- **Completed on:** —
+- **What was built:**
+  - `services/email_notify.py`: builds the BRD 23 email content (event name/ID, operation date/time, identified/downloaded/synchronised/failed counts, error summary, overall status), sends it via Azure Communication Services, classifies every send failure (no connectivity vs. auth/HTTP/unexpected), and logs the outcome (`Email Notification` operation; `Success` / `Skipped` / `Failed`) — never raises to its caller, so a notification problem can never turn a successful Download & Sync into a failed one.
+  - `services/downloads.py`: `run_job` calls the notifier once, after the run's own finished-row log entry, only for a full Download & Sync (never a Download-only or Sync-only partial run), on its own database connection.
+  - **Addendum A 39.3's new business rule:** no internet connectivity at notification time is logged as `Skipped — no connectivity`, not a failure; the underlying run itself always completes and logs normally regardless.
+  - **Sender address added to Settings → Email** (owner default, flagged for review): ACS requires a verified "from" address on every send, which Phase 10's field list didn't carry forward from the superseded BRD 14 SMTP fields. Required together with the recipient when notifications are enabled.
+  - The ACS connection string is parsed by hand (`endpoint=`/`accesskey=`, order/case-insensitive) rather than via the SDK's own `from_connection_string`, specifically so the pre-existing read-only-Azure-Storage AST guard (Business Rule 13, `tests/test_storage.py`) did not need to be weakened to admit it — that guard's import check was instead explicitly widened to name `email_notify.py`, with its own narrower guard (Communication/Core only) added.
+  - `azure-communication-email==1.1.0` added (pip-audit clean).
+  - 22 new tests (`tests/test_phase11_email.py`). 1465 automated tests pass (14 skipped — live-Azure-**Storage** tests from earlier phases; there is no live-ACS test yet, see below).
+- **QA Test Case doc:** `docs/QA_Desktop_Phase11_EmailNotification.md`
+- **Security Checklist:** `docs/Security_Desktop_Phase11_EmailNotification.md`
+- **Independent architect review:** **Approved with notes after fixes.** Two "fix now" findings, reproduced against the real installed Azure SDK (not assumed) and fixed: (1) a send still running when the 30-second wait gave up was silently logged as a confirmed "sent" — `LROPoller.result(timeout=...)` returns quietly with no exception in that case; now `poller.done()` is also checked, and a not-yet-terminal send is logged `Failed`, never `Success`. (2) the Settings UI could enable notifications with no connection string ever saved (a recipient and sender were required, but not a connection string), leaving them permanently, silently non-functional; enabling now also requires one, existing or newly typed. Two informational notes also closed: an AST-guard comment overstated a narrower protection than existed (corrected, and the narrower guard now actually exists as a test); no test exercised the real, non-faked ACS client construction path (added). Confirmed sound: exception-safety at every layer, the connection string never appears on any observable surface, the notifier's database-connection isolation from the run's own, BRD 23 field completeness, the Skipped-vs-Failed classification, and the full-Download-&-Sync-only scoping. Fixes verified by 6 new tests; **not** re-reviewed.
+- **Deviations / owner decisions:**
+  1. **Sender address field added** — not in Phase 10's Email Settings; required by Azure Communication Services itself. My default; tell me if wrong.
+  2. **Notification scoped to a full Download & Sync only**, not Download-only/Sync-only partial runs, and not yet a *scheduled* run (Phase 12 doesn't exist yet — the same hook covers it once Phase 12 arrives).
+  3. **BRD Section 23's status wording extended with "Cancelled"** (a real outcome the BRD's three examples don't cover), computed separately from the run-level oplog row's own Success/Failed/Cancelled vocabulary (Phase 9, unchanged) so the email can distinguish a run that finished with some file-level failures from one that stopped outright.
+  4. **No live validation yet against a real Azure Communication Services resource** — unlike Phase 4 (where the owner supplied the real Storage Account key), no real ACS connection string, verified sender address, or test recipient exists for this project yet. Addendum A 39.3 said these "will be supplied when Phase 11 begins." **Needed from the owner before this phase can be marked complete:** a real ACS connection string, a verified sender address/domain on that resource, and a test recipient address.
+  5. **Not yet merged to `main`** — pending the items above, then the owner's go-ahead.
 
 ## Phase 12 — Scheduled Operation
 - **Status:** Not started
@@ -282,7 +300,7 @@ Status values: `Not started` / `In progress` / `Awaiting user go-ahead` / `Compl
 | 8 | Complete | 22 Sep 2026 | `9b45c8c`, `e507da8`, `643bbea` (merge `47eafa0`) |
 | 9 | Complete | 22 Sep 2026 | `3b298d0`, `0746e68`, `5d9bef3` (merge `1e58e0d`) |
 | 10 | Complete | 23 Sep 2026 | `e48bb8b`, `7f0261c` (merge `632576b`) |
-| 11 | Not started | | |
+| 11 | In progress | | (not yet merged — blocked on owner-supplied ACS credentials) |
 | 12 | Not started | | |
 | 13 | Not started | | |
 | 14 | Not started | | |
