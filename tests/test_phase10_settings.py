@@ -574,3 +574,29 @@ def test_the_cutoff_field_shows_a_live_utc_clock_and_a_local_time_preview(ev):
     html = ev.get("/events/1000").get_data(as_text=True)
     assert "data-utc-clock" in html and "enter in <strong>UTC</strong>" in html
     assert 'data-utc-time-preview="cutoff-time-local"' in html and 'data-utc-time-target' in html
+
+
+def test_the_boundary_status_line_states_which_day_is_actually_held_not_just_today(ev, cfg):
+    """Owner-reported confusion (23 Sep 2026): a bare '= H:MM local time today' preview of the TYPED
+    clock reading looked like it described the active boundary, but the real boundary can be today's or
+    yesterday's UTC occurrence depending on the browser's offset - the label never said which. The page
+    must instead render the server's own cutoff_boundary() instant (never re-derived in JS), so the two
+    can never disagree, and say nothing at all when there is no active boundary to state."""
+    html = ev.get("/events/1000").get_data(as_text=True)
+    assert "data-utc-instant-preview" not in html          # no cut-off saved yet: nothing to claim
+
+    conn = connect(cfg.db_path)
+    changes.save_cutoff_settings(conn, "1000", True, "21:00")
+    conn.close()
+    html = ev.get("/events/1000").get_data(as_text=True)
+    conn = connect(cfg.db_path)
+    expected = changes.cutoff_boundary(changes.load_cutoff_settings(conn, "1000"))
+    conn.close()
+    assert expected is not None
+    assert f'data-utc-instant-preview="{expected.strftime("%Y-%m-%dT%H:%M:%SZ")}"' in html
+
+    conn = connect(cfg.db_path)                            # the emergency override: no active boundary to show
+    changes.save_cutoff_settings(conn, "1000", False, "21:00")
+    conn.close()
+    html = ev.get("/events/1000").get_data(as_text=True)
+    assert "data-utc-instant-preview" not in html

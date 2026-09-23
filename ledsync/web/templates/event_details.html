@@ -45,6 +45,9 @@
       <strong>up to and including</strong> the most recent time this cut-off has passed today (or, before it has passed today, up to
       yesterday's). Anything changed after that is held back &mdash; not lost &mdash; and is picked up automatically once the next day's
       cut-off passes. Turn it off at any time, for example in an emergency, to fetch everything immediately.</p>
+    {% if cutoff_boundary_iso %}
+    <p id="cutoff-status" class="hint mono" data-utc-instant-preview="{{ cutoff_boundary_iso }}"></p>
+    {% endif %}
     {% if cutoff_error %}
     <p id="cutoff-error" class="alert alert-error" role="alert">{{ cutoff_error }}</p>
     {% endif %}

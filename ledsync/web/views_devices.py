@@ -62,12 +62,14 @@ def _render(row, struct, status=200, posted=None, error=None, cutoff_enabled=Non
            cutoff_error=None):
     hidden = [m for m in mappings.list_mappings(get_db(), row["event_id"], enabled=False) if m.shared_folder]
     saved_cutoff = changes.load_cutoff_settings(get_db(), row["event_id"])
+    boundary = changes.cutoff_boundary(saved_cutoff)
     ctx = dict(app_name=APP_NAME, version=__version__, username=session.get("user"), event=row,
                structure=struct, structure_error=None, rows=_rows(row["event_id"], posted), hidden=hidden,
                led_types=structure.LED_TYPES, led_labels=structure.LED_LABELS, error=error,
                cutoff_enabled=(saved_cutoff.enabled if cutoff_enabled is None else cutoff_enabled),
                cutoff_time_typed=(saved_cutoff.time if cutoff_time_typed is None else cutoff_time_typed),
-               cutoff_error=cutoff_error)
+               cutoff_error=cutoff_error,
+               cutoff_boundary_iso=(boundary.strftime("%Y-%m-%dT%H:%M:%SZ") if boundary else None))
     return render_template("event_details.html", **ctx), status
 
 
