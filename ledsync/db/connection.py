@@ -4,6 +4,7 @@ import logging
 import sqlite3
 from pathlib import Path
 
+from .migrations import run_migrations
 from .schema import DDL, SCHEMA_VERSION, TABLES
 
 BUSY_TIMEOUT_MS = 5000
@@ -43,9 +44,10 @@ def init_db(db_path: Path) -> None:
             )
         conn.executescript(DDL)
         _ensure_event_id_index(conn)
-        _ensure_events_cutoff_columns(conn)
         if version == 0:
-            conn.execute(f"PRAGMA user_version = {SCHEMA_VERSION}")
+            conn.execute(f"PRAGMA user_version = {SCHEMA_VERSION}")   # brand-new: no migration to run
+        elif version < SCHEMA_VERSION:
+            run_migrations(conn, version, SCHEMA_VERSION)
         conn.commit()
         _verify(conn)
     finally:
@@ -65,17 +67,6 @@ def _ensure_event_id_index(conn: sqlite3.Connection) -> None:
         conn.rollback()
         logging.getLogger("ledsync.db").warning(
             "events already holds Event IDs that differ only by case; the uniqueness index was not created.")
-
-
-def _ensure_events_cutoff_columns(conn: sqlite3.Connection) -> None:
-    """A database created before Phase 10 has neither `events.cutoff_enabled` nor `events.cutoff_time`
-    (`CREATE TABLE IF NOT EXISTS` never alters an existing table). Added at the end, in the same order as a
-    fresh database's DDL, so `_verify`'s column-order check passes either way. Idempotent."""
-    columns = {r["name"] for r in conn.execute("PRAGMA table_info(events)")}
-    if "cutoff_enabled" not in columns:
-        conn.execute("ALTER TABLE events ADD COLUMN cutoff_enabled INTEGER NOT NULL DEFAULT 0")
-    if "cutoff_time" not in columns:
-        conn.execute("ALTER TABLE events ADD COLUMN cutoff_time TEXT")
 
 
 def _verify(conn: sqlite3.Connection) -> None:

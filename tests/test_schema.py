@@ -157,13 +157,17 @@ def test_init_creates_missing_parent_directory(tmp_path):
 
 def test_a_database_from_before_phase_10_gains_the_cutoff_columns_in_the_right_place(cfg):
     """`CREATE TABLE IF NOT EXISTS` never alters a table that already exists, so an upgrade from an
-    earlier version needs its own step - added at the END, matching a fresh database's column order."""
+    earlier version needs its own migration - added at the END, matching a fresh database's column
+    order. `PRAGMA user_version = 1` matches reality: every database from before this migration
+    existed had already been stamped to (the then-current) SCHEMA_VERSION 1 by its own earlier
+    init_db() call - a real pre-Phase-10 database is never actually at version 0."""
     conn = sqlite3.connect(cfg.db_path)
     try:
         conn.execute("CREATE TABLE events (event_id TEXT PRIMARY KEY, event_name TEXT NOT NULL, event_guid TEXT, "
                      "configuration_file TEXT, configuration_json TEXT, configuration_version TEXT, "
                      "last_updated TEXT, last_download TEXT, last_sync TEXT, status TEXT)")
         conn.execute("INSERT INTO events (event_id, event_name) VALUES ('1000', 'Old Event')")
+        conn.execute("PRAGMA user_version = 1")
         conn.commit()
     finally:
         conn.close()

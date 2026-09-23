@@ -300,8 +300,31 @@ Status values: `Not started` / `In progress` / `Awaiting user go-ahead` / `Compl
   7. **Merged to `main` and pushed** — see the table below for hashes.
 
 ## Phase 13 — Installer and Upgrade Handling
-- **Status:** Not started
-- **Completed on:** / **What was built:** / **QA Test Case doc:** / **Security Checklist:** / **Deviations:**
+- **Status:** In progress (built and self-tested 23 September 2026 — real PyInstaller freeze built and smoke-tested on this machine; Inno Setup packaging written but not yet compiled, since the Inno Setup Compiler is a separate third-party Windows tool not installed here; not yet independently reviewed — see Deviations; not yet merged to `main`)
+- **Includes:** Step 13.1 — new installation path (PyInstaller freeze + Inno Setup package); Step 13.2 — upgrade path (schema migration runner + install-folder/data-folder separation).
+- **Completed on:** —
+- **What was built:**
+  - **`db/migrations.py`** (NEW): a general, versioned schema-migration runner, resolving BRD Section 36's open "schema migration approach" item ahead of any concrete need (owner decision, 23 Sep 2026: build it now, not when first needed). `SCHEMA_VERSION` bumped 1 → 2 by converting the one real ad-hoc schema change this application has ever made (Phase 10's `events.cutoff_enabled`/`cutoff_time` columns) into the first real, versioned migration — the framework has a genuine migration to validate against, not just a synthetic one.
+  - **`services/install_config.py`** (NEW): a pre-install configuration file (owner request, 23 Sep 2026) — Cloud Storage, Email Notification, and default Scheduling day/time/account, editable once and reused across every venue machine, applied ONLY to a brand-new database, through the exact same validation the Settings pages already use. **Never accepts a Scheduling password or an "enabled" flag for scheduling** — those still require the operator, once, in Settings → Scheduling after install (Phase 12's "the password is never stored" guarantee holds unchanged).
+  - **`main.py --seed-config`**: the installer's own hook into the above — applies the file (if given) to a brand-new database, then exits; never opens a window, never checks for WebView2, and a bad file is logged, never fatal.
+  - **`services/scheduler.py`**: a frozen build now registers a dedicated `LEDAssetSyncScheduled.exe` (installed alongside the main app) instead of `python.exe -m ledsync.scheduled_run`, which does not exist on a venue machine at all.
+  - **`installer/ledsync.spec`**: PyInstaller spec producing TWO executables from one shared bundle (`LEDAssetSync.exe` windowed, `LEDAssetSyncScheduled.exe` console/headless) — not one binary dispatching on a flag, so the shipped headless executable genuinely cannot import pywebview.
+  - **`installer/ledsync.iss`**: Inno Setup script. Per-user install (no admin needed); never touches the DATA folder (`%LocalAppData%\LEDAssetSync`), only the INSTALL folder — which is what makes "preserve the existing database on upgrade" (BRD 13.2) hold automatically. Runs `--seed-config` post-install only for a fresh install with a config file present next to `Setup.exe`.
+  - **`installer/install-config.example.json`**, **`installer/README.md`**: the documented schema and full build procedure.
+  - 27 new tests (`tests/test_phase13_installer.py`).
+  - **Real PyInstaller freeze built and smoke-tested on this machine** (not simulated): both executables built cleanly first attempt; the headless exe ran end to end against a scratch data folder (correct oplog rows); `--seed-config` applied a real config file correctly with no window opened; the windowed exe opened a real WebView2 window, served the UI, and closed cleanly.
+  - 1519 automated tests pass (14 skipped — unrelated live-Azure-Storage tests from earlier phases).
+- **QA Test Case doc:** `docs/QA_Desktop_Phase13_InstallerAndUpgrade.md`
+- **Security Checklist:** `docs/Security_Desktop_Phase13_InstallerAndUpgrade.md`
+- **Independent architect review:** Not yet run for this phase in isolation — per the owner's explicit instruction (23 Sep 2026), a single, broader review covering every phase (0–13) is scheduled ahead of final hand-off instead.
+- **Deviations / owner decisions:**
+  1. **Packaging: PyInstaller + Inno Setup**, no code-signing (Addendum A 39.4, already confirmed).
+  2. **Build the schema-migration framework now**, ahead of any concrete need (owner's explicit choice, overriding the minimal/deferred recommendation).
+  3. **Pre-install config file: an editable text file next to the installer**, not an interactive installer wizard.
+  4. **The config file can never set a Scheduling password or turn scheduling on** — only pre-fill the account name/day/time defaults; enabling still requires the operator, once, after install.
+  5. **Task Scheduler registration itself remains Settings → Scheduling's job** (Phase 12 decision, unchanged) — Phase 13 does not attempt to register a task at install time, since that needs a password the installer must never hold.
+  6. **Inno Setup Compiler not installed in this environment** — a separate third-party Windows tool, not a Python package, so not installed without the owner's explicit go-ahead. The `.iss` script is written and documented (`installer/README.md`) but not yet compiled or run on a clean machine — BRD 13.1/13.2's own validation criteria (clean-machine install, then an upgrade preserving data) are not yet done. Recorded as F-82.
+  7. **Not yet merged to `main`** — pending Inno Setup compilation/clean-machine validation, the all-phases architect review, and the owner's go-ahead.
 
 ## Phase 14 — Full Workflow and Acceptance Validation
 - **Status:** Not started
