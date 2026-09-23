@@ -1,4 +1,5 @@
 {% extends "base.html" %}
+{% from "_password_field.html" import password_field %}
 {% block title %}Scheduling Settings — {{ app_name }}{% endblock %}
 {% block body %}
 {% include "_topbar.html" %}
@@ -9,8 +10,9 @@
   <h1>Settings</h1>
   {% set section = 'scheduling' %}{% include "_settings_nav.html" %}
   <h2 class="settings-section">Scheduling</h2>
-  <p class="lede">When Download &amp; Sync should run automatically. <strong>This saves the schedule; it does not yet start it</strong> —
-    scheduled runs arrive in a later phase, using this schedule through Windows Task Scheduler.</p>
+  <p class="lede">When Download &amp; Sync should run automatically, for every registered event. Runs via Windows
+    Task Scheduler and works even if nobody is signed in to Windows at the time — a missed occurrence (the
+    computer was off or asleep) catches up as soon as it is next on.</p>
 
   {% if error %}
   <p id="form-error" data-focus-alert class="alert alert-error" role="alert">{{ error }}</p>
@@ -20,7 +22,7 @@
     <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
     <div class="field">
       <label class="checkbox-label"><input type="checkbox" name="enabled" value="1" {% if enabled %}checked{% endif %}> Enable scheduled runs</label>
-      <p class="hint">Turning this on needs at least one day and a time below.</p>
+      <p class="hint">Turning this on needs at least one day, a time, a Windows account and its password below.</p>
     </div>
     <fieldset class="field">
       <legend>Days</legend>
@@ -31,14 +33,30 @@
       </div>
     </fieldset>
     <div class="field">
-      <label for="time">Time (24-hour)</label>
+      <label for="time">Time (24-hour, this computer's own local time)</label>
       <input id="time" name="time" type="time" value="{{ time_typed }}" aria-describedby="{% if error %}form-error {% endif %}time-hint">
       <p id="time-hint" class="hint">For example <span class="mono">02:30</span>. Leave it blank for no scheduled time.</p>
     </div>
+    <div class="field">
+      <label for="username">Windows account</label>
+      <input id="username" name="username" type="text" value="{{ username_typed }}" maxlength="200" autocomplete="off"
+             spellcheck="false" aria-describedby="username-hint">
+      <p id="username-hint" class="hint">The account the scheduled run uses — for example <span class="mono">DOMAIN\user</span> or
+        <span class="mono">COMPUTERNAME\user</span>. It needs the same access to the mapped LED folders this application already uses
+        when you are signed in.</p>
+    </div>
+    {{ password_field("password", "password", "Windows account password", autocomplete="off", required=False,
+                      hint=("Required every time you save while the schedule is on — this application never stores it; "
+                            "it is passed once to Windows Task Scheduler, which keeps it in its own secure credential store, "
+                            "exactly as if you had registered the task by hand."),
+                      describedby=("form-error" if error else None)) }}
     <dl class="kv">
-      <dt>Windows Task Scheduler / batch execution</dt>
-      <dd>The application does not run as a background service. A Windows Task Scheduler task (created by the installer) starts it at the
-        configured time; this page only stores the schedule the task will use.</dd>
+      <dt>Windows Task Scheduler</dt>
+      <dd>
+        {% if registered %}<span class="badge badge-synced">Registered</span>{% else %}<span class="badge badge-attention">Not registered</span>{% endif %}
+        — task name <span class="mono">LEDAssetSync Scheduled Run</span>. Saving this page with the schedule on
+        creates or updates it immediately; turning it off removes it.
+      </dd>
     </dl>
     <div class="form-actions">
       <button type="submit" class="btn btn-primary">SAVE SETTINGS</button>

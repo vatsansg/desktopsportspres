@@ -61,7 +61,7 @@ OPERATIONS = (
     "Application Startup", "Login", "Logout", "Password Change", "Event Registered", "Event Re-registered", "Settings Changed",
     "Mapping Saved", "Device Test", "Cloud Storage Test", "Check Changes", "Download & Sync", "Download Files", "Sync Files",
     "Asset Download", "RPI Files", "Synchronise", "Exception Reviewed", "Log Export", "Email Notification",
-    "Scheduled Run",          # (later) Phase 12
+    "Scheduled Run",          # Phase 12
     "Application Update",     # (later) Phase 13
 )
 STATUS_FILTERS = ("Success", "Failed", "Blocked", "Started", "Cancelled", "Skipped")
