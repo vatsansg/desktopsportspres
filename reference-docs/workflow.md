@@ -331,7 +331,7 @@ Status values: `Not started` / `In progress` / `Awaiting user go-ahead` / `Compl
   9. **Merged to `main` and pushed** — see the table below for hashes.
 
 ## Phase 14 — Full Workflow and Acceptance Validation
-- **Status:** Complete (traceability/sign-off pass, 24 September 2026 — introduces no new application code; owner go-ahead pending)
+- **Status:** Complete (traceability/sign-off pass, 24 September 2026 — introduces no new application code; owner go-ahead given, merged to `main` and pushed)
 - **Includes:** Step 14.1 — Standard Download and Sync workflow (BRD Section 30) run-through; Step 14.2 — Scheduled workflow (BRD Section 31) run-through, unattended; Step 14.3 — Functional Requirements (Section 32, FR-001–FR-025) and Acceptance Criteria (Section 35, AC-01–AC-15) sign-off checklist.
 - **Completed on:** 24 Sep 2026
 - **What was built:** Nothing new — this phase is a verification pass over the application as it stood after Phase 13. `docs/QA_Desktop_Phase14_FullWorkflowAndAcceptanceValidation.md` traces every one of BRD Section 30's and Section 31's workflow steps to the real code path and real live validation that already covers it (Phases 6–13), and every one of the 25 Functional Requirements and 15 Acceptance Criteria to a specific citation (a phase, a file, a test, or a real live-validation moment) — **all 40 confirmed met**, none deferred. BRD Section 36's "Open Points" are also individually re-confirmed resolved (a table cross-referencing which phase resolved each). No gaps found requiring new code.
@@ -360,4 +360,4 @@ Status values: `Not started` / `In progress` / `Awaiting user go-ahead` / `Compl
 | 11 | Complete | 23 Sep 2026 | `8df2ca4`, `ee806d3`, `09a49b1`, `40a2a8c`, `0f69b5c` (merge `ae3d470`) |
 | 12 | Complete | 23 Sep 2026 | `2869364`, `e26a4ab`, `97fa262`, `ef431e2` (merge `2209eeb`) |
 | 13 | Complete | 24 Sep 2026 | `59449ab`, `75a1d9e`, `ce3b913`, `4882f82`, `7230b18`, `9190ba8` (merge `adf53c1`) |
-| 14 | Not started | | |
+| 14 | Complete | 24 Sep 2026 | `b4e6e95` (merge `02ea7bc`) |

@@ -43,4 +43,4 @@ None — no new code, no new finding.
 | Role | Name | Date | Outcome |
 |---|---|---|---|
 | Independent Solution Architect review | — | — | Not re-run for this phase — see "What this phase's own scope does and does not cover" above; the Phase 13 all-phases review stands as the current security sign-off. |
-| User (Vatsan) go-ahead | Vatsan | pending | pending |
+| User (Vatsan) go-ahead | Vatsan | 24/09/26 | **Go-ahead given.** Merged to `main` and pushed. |
