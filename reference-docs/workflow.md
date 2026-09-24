@@ -344,6 +344,11 @@ Status values: `Not started` / `In progress` / `Awaiting user go-ahead` / `Compl
 
 ## Overall status
 
+**Release `v0.1.0` tagged 24 September 2026** at `e346fff` (all 14 phases complete) — owners have
+begun end-to-end testing by real IT operations users, from asset upload through to using the
+Download/Sync application. Further work on this tracker resumes only if that testing raises
+queries or issues.
+
 | Phase | Status | Go-ahead date | GitHub commit |
 |---|---|---|---|
 | 0 | Complete | 20 Sep 2026 | `a35cfe2` |
