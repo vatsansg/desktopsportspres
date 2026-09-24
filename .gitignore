@@ -10,6 +10,12 @@ OBSERVATIONS.txt
 *.pem
 *.key
 
+# --- Phase 13: a real install-config.json can carry a real storage key / ACS connection string -
+# only installer/install-config.example.json (placeholders only) is ever tracked ---
+installer/install-config.json
+installer/install-config.*.json
+!installer/install-config.example.json
+
 # --- Local runtime data (SQLite DB, logs, downloaded assets, local change log) ---
 *.db
 *.db-journal
