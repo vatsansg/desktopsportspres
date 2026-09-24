@@ -10,10 +10,11 @@ import logging
 import sys
 import time
 from datetime import datetime, timedelta, timezone
+from pathlib import Path
 
 from . import APP_NAME, __version__, config, logging_setup, platform_checks
 from .db import connect, init_db
-from .services import auth, exceptions, oplog, singleinstance
+from .services import auth, exceptions, install_config, oplog, singleinstance
 from .services import settings as cloud_settings
 from .web import create_app, start_server
 
@@ -69,18 +70,51 @@ def _run(args: argparse.Namespace) -> None:
     if log_path:
         log.info("Diagnostic log: %s", log_path)
 
-    if platform_checks.webview2_version() is None:
+    seeding = args.seed_config is not None
+    # --seed-config (Phase 13, invoked by the installer right after a fresh install - see
+    # _run_seed_config) never opens a window, so a WebView2-less build environment or a moment
+    # before WebView2 is confirmed present cannot block it.
+    if not seeding and platform_checks.webview2_version() is None:
         raise StartupError(WEBVIEW2_HELP)
 
-    # Held for as long as the window stays open, so a scheduled run (Phase 12) can never start while
-    # this interactive session is using the same data folder, and vice versa.
+    # Held for as long as the window stays open (or the seed step runs), so a scheduled run
+    # (Phase 12) can never start while this process is using the same data folder, and vice versa.
     try:
         with singleinstance.instance_lock(cfg.data_dir):
-            _run_ui(cfg, args)
+            if seeding:
+                _run_seed_config(cfg, args.seed_config)
+            else:
+                _run_ui(cfg, args)
     except singleinstance.AlreadyRunning as exc:
         raise StartupError(
             "The application is already open, or a scheduled run is in progress, for this data "
             f"folder.\n\n{exc}") from None
+
+
+def _run_seed_config(cfg: config.Config, path: Path) -> None:
+    """Installer-only entry point (Phase 13, `--seed-config`): apply a pre-install configuration
+    file to a brand-new database, then return - no window, no server, nothing else. Silently does
+    nothing on an existing (already-configured) database - see install_config.should_seed - so
+    re-running the installer, or an upgrade that happens to still carry the file, can never
+    overwrite a venue's already-configured installation."""
+    init_db(cfg.db_path)
+    conn = connect(cfg.db_path)
+    try:
+        if not install_config.should_seed(conn):
+            log.info("Install configuration file given but the database is not brand-new; skipped.")
+            return
+        try:
+            data = install_config.load_config_file(path)
+            changed = install_config.seed(conn, data, cfg.data_dir)
+        except install_config.InstallConfigError as exc:
+            # Never fatal: a bad or missing config file must not block a silent installer step -
+            # the operator simply configures Settings by hand after first launch, exactly as an
+            # install with no config file at all already works today.
+            log.warning("Install configuration file was not applied: %s", exc)
+            return
+        log.info("Applied install configuration: %s", ", ".join(changed) if changed else "(nothing to apply)")
+    finally:
+        conn.close()
 
 
 def _run_ui(cfg: config.Config, args: argparse.Namespace) -> None:
@@ -124,6 +158,11 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument(
         "--auto-close", type=float, metavar="SECONDS", default=None,
         help="Close the window automatically after N seconds (used by automated smoke tests).",
+    )
+    parser.add_argument(
+        "--seed-config", type=Path, metavar="PATH", default=None,
+        help="Apply a pre-install configuration file to a brand-new database, then exit "
+             "(invoked by the installer; a no-op on an already-configured database).",
     )
     args = parser.parse_args(argv)
 

@@ -114,6 +114,14 @@ class CloudSettings:
 
 # --- the single place the key is read/written ---------------------------------------------
 
+def has_any_setting(conn: sqlite3.Connection) -> bool:
+    """True if ANYTHING has ever been saved here - Phase 13's install_config.py uses this (rather
+    than touching `application_settings` directly, which only this module and auth.py may do - see
+    the SCOPE GUARD note above) as its definition of "brand new" before applying a pre-install
+    configuration file."""
+    return conn.execute("SELECT COUNT(*) AS n FROM application_settings").fetchone()["n"] > 0
+
+
 def _get(conn: sqlite3.Connection, key: str) -> str:
     if key not in OWNED_KEYS:
         raise PermissionError("settings.py may only touch its own keys")

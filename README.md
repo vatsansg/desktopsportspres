@@ -42,6 +42,11 @@ The Storage Account access key is required from Phase 4. It goes **only** in a l
 `.env` (copy `.env.example`). Never commit it, and never write it into any document.
 `tests/test_no_secrets.py` fails if anything key-shaped becomes committable.
 
+## Building the installer
+
+See `installer/README.md` for the full build (PyInstaller) + package (Inno Setup) steps and the
+pre-install configuration file.
+
 ## Branching / commits
 
 Mirrors the web application: one `phase-N-<name>` branch per phase, merged to `main`; commit

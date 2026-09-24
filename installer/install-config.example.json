@@ -1,0 +1,23 @@
+{
+  "_comment": "Copy this file to 'install-config.json' next to Setup.exe (NOT inside this repo) and edit it before running the installer on a venue machine. Every field is optional - omit anything you don't want pre-filled; the operator can always fill it in later via Settings. This file is applied ONCE, only to a brand-new installation - it is never read again on an upgrade. A Windows account PASSWORD must never be added here (there is no such field, on purpose) - see ledsync/services/install_config.py.",
+
+  "cloud_storage_account": "sasportspresentation",
+  "cloud_container": "2026",
+  "storage_access_key": "",
+
+  "email_enabled": false,
+  "email_recipient": "it@example.com, ops@example.com",
+  "email_sender": "desktop-notifications@<your-domain>.azurecomm.net",
+  "email_connection_string": "endpoint=https://<your-resource>.communication.azure.com/;accesskey=<your-key>",
+
+  "schedule_days": ["Mon", "Wed", "Fri"],
+  "schedule_time": "21:00",
+  "schedule_username": "",
+
+  "download_retry_count": 3,
+  "download_retry_delay": 5,
+  "log_retention_days": 90,
+
+  "rpi_folder": "",
+  "asset_folder": ""
+}

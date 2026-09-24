@@ -29,6 +29,13 @@ log = logging.getLogger("ledsync.scheduler")
 TASK_NAME = "LEDAssetSync Scheduled Run"
 _RUN_TIMEOUT = 30  # seconds - schtasks talking to the local Task Scheduler service, never the network
 
+# Phase 13: a frozen (PyInstaller) build ships as two separate executables from one Analysis -
+# the windowed main application and this dedicated console one for scheduled_run.py - rather than
+# one exe dispatching on an argv flag, so the existing "never imports pywebview" guarantee
+# (services/singleinstance.py's docstring, tests/test_phase12_scheduled.py's subprocess-import
+# check) stays true of the actual shipped artifact, not just the source layout.
+SCHEDULED_RUN_EXE_NAME = "LEDAssetSyncScheduled.exe"
+
 _DAY_ELEMENT = {
     "Mon": "Monday", "Tue": "Tuesday", "Wed": "Wednesday", "Thu": "Thursday",
     "Fri": "Friday", "Sat": "Saturday", "Sun": "Sunday",
@@ -56,12 +63,27 @@ def _invoke(args: list[str], runner=None):
         raise SchedulerError("Could not run Windows Task Scheduler (schtasks.exe).") from None
 
 
+def _command_and_args(data_dir: Path) -> tuple[str, str]:
+    """The Task's own Command/Arguments. A frozen build has no `python.exe`/`-m` available at all on
+    the venue machine, so it uses the dedicated scheduled-run executable installed next to the main
+    application's; running from source (development) uses the real Python interpreter with
+    `-m ledsync.scheduled_run`, exactly as before Phase 13. Either way `--data-dir` is baked in
+    explicitly (independent review, Phase 12) rather than left to scheduled_run.py's own default
+    resolution, which is scoped to whichever Windows account actually runs the Task - not
+    necessarily the account that registered it here."""
+    if getattr(sys, "frozen", False):
+        exe = Path(sys.executable).with_name(SCHEDULED_RUN_EXE_NAME)
+        return str(exe), f'--data-dir "{data_dir}"'
+    return sys.executable, f'-m ledsync.scheduled_run --data-dir "{data_dir}"'
+
+
 def _task_xml(username: str, days: tuple, time_value: str, working_dir: Path, data_dir: Path) -> str:
     if not days:
         raise SchedulerError("At least one day is needed to register the scheduled task.")
     hour, minute = time_value.split(":")
     anchor = datetime.now().strftime("%Y-%m-%d")
     days_xml = "".join(f"<{_DAY_ELEMENT[d]} />" for d in days if d in _DAY_ELEMENT)
+    command, arguments = _command_and_args(data_dir)
     return (
         '<?xml version="1.0" encoding="UTF-16"?>\n'
         '<Task version="1.4" xmlns="http://schemas.microsoft.com/windows/2004/02/mit/task">\n'
@@ -99,13 +121,8 @@ def _task_xml(username: str, days: tuple, time_value: str, working_dir: Path, da
         "  </Settings>\n"
         '  <Actions Context="Author">\n'
         "    <Exec>\n"
-        f"      <Command>{escape(sys.executable)}</Command>\n"
-        # --data-dir is baked in explicitly (independent review, Phase 12) rather than left to
-        # scheduled_run.py's own default resolution, which is scoped to whichever Windows account
-        # actually runs the Task - not necessarily the account that registered it here. Without this,
-        # a schedule registered to run as a dedicated/different account (exactly what Addendum A 39.6
-        # exists to allow) would silently find an empty data folder and report "Success" forever.
-        f'      <Arguments>-m ledsync.scheduled_run --data-dir "{escape(str(data_dir))}"</Arguments>\n'
+        f"      <Command>{escape(command)}</Command>\n"
+        f"      <Arguments>{escape(arguments)}</Arguments>\n"
         f"      <WorkingDirectory>{escape(str(working_dir))}</WorkingDirectory>\n"
         "    </Exec>\n"
         "  </Actions>\n"

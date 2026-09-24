@@ -26,11 +26,13 @@ The logs (operation_log, exception_log) have no foreign key to `events`: a
 rejected registration (Step 3.2) must be loggable for an event that never made
 it into `events`.
 
-Schema version is tracked with `PRAGMA user_version` (not a table), so this does
-not pre-empt the open "schema migration approach" decision (Section 36).
+Schema version is tracked with `PRAGMA user_version` (not a table). Bringing an existing database
+from an older SCHEMA_VERSION up to the current one is `db/migrations.py`'s job (Phase 13, resolves
+the Section 36 "schema migration approach" item) - this module only ever describes the CURRENT
+schema; a brand-new database is created directly from it and never runs a migration.
 """
 
-SCHEMA_VERSION = 1
+SCHEMA_VERSION = 2
 
 DDL = """
 CREATE TABLE IF NOT EXISTS events (

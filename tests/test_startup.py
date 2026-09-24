@@ -181,7 +181,7 @@ def test_downloads_are_allowed_before_the_window_opens(data_dir, monkeypatch):
     monkeypatch.setitem(sys.modules, "webview", fake_webview)
     monkeypatch.setattr(platform_checks, "webview2_version", lambda: "1.0")
 
-    main_mod._run(argparse.Namespace(auto_close=None))
+    main_mod._run(argparse.Namespace(auto_close=None, seed_config=None))
 
     assert fake_webview.settings["ALLOW_DOWNLOADS"] is True
     assert order == ["create_window", "start"]                 # allowed before the window is shown, not after
